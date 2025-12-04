@@ -1,152 +1,373 @@
-@echo off
-setlocal enabledelayedexpansion
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
-set "COLOR_UPDATE=UPDATE"
-set "COLOR_ERROR=ERROR"
-set "COLOR_SUCCESS=SUCCESS"
-set "COLOR_PROCESS=PROCESS"
-set "COLOR_DONE=DONE"
-set "RESET="
+# Create the main form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Discord Voice Module Auto-Fixer"
+$form.Size = New-Object System.Drawing.Size(500, 500)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+$form.BackColor = [System.Drawing.Color]::FromArgb(32, 34, 37)  # Discord dark background
 
-echo [%COLOR_UPDATE%] Checking for updates...
-pause
+# Title Label
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Location = New-Object System.Drawing.Point(10, 10)
+$titleLabel.Size = New-Object System.Drawing.Size(460, 30)
+$titleLabel.Text = "Discord Voice Module Auto-Fixer"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$titleLabel.TextAlign = "MiddleCenter"
+$titleLabel.ForeColor = [System.Drawing.Color]::White
+$titleLabel.BackColor = [System.Drawing.Color]::Transparent
+$form.Controls.Add($titleLabel)
 
-set "updateURL=https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.bat"
-set "tempFile=%temp%\stereo_update.tmp"
+# Discord Client Selection (moved above options box)
+$clientLabel = New-Object System.Windows.Forms.Label
+$clientLabel.Location = New-Object System.Drawing.Point(10, 50)
+$clientLabel.Size = New-Object System.Drawing.Size(100, 20)
+$clientLabel.Text = "Discord Client:"
+$clientLabel.ForeColor = [System.Drawing.Color]::White
+$form.Controls.Add($clientLabel)
 
-echo [%COLOR_UPDATE%] Downloading latest script from GitHub...
-curl -L "%updateURL%" -o "%tempFile%"
-echo Downloaded file: "%temp%\stereo_update.tmp"
+$clientCombo = New-Object System.Windows.Forms.ComboBox
+$clientCombo.Location = New-Object System.Drawing.Point(110, 48)
+$clientCombo.Size = New-Object System.Drawing.Size(200, 25)
+$clientCombo.DropDownStyle = "DropDownList"
+$clientCombo.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)
+$clientCombo.ForeColor = [System.Drawing.Color]::White
+$clientCombo.FlatStyle = "Flat"
+[void]$clientCombo.Items.Add("Discord (Stable)")
+[void]$clientCombo.Items.Add("Discord PTB")
+[void]$clientCombo.Items.Add("Discord Canary")
+[void]$clientCombo.Items.Add("Discord Development")
+[void]$clientCombo.Items.Add("Vencord")
+$clientCombo.SelectedIndex = 0
+$form.Controls.Add($clientCombo)
 
-echo [%COLOR_UPDATE%] Comparing scripts...
-fc "%tempFile%" "%~f0" >nul
-echo Error level after fc: %errorlevel%
+# Options GroupBox
+$optionsGroup = New-Object System.Windows.Forms.GroupBox
+$optionsGroup.Location = New-Object System.Drawing.Point(10, 80)
+$optionsGroup.Size = New-Object System.Drawing.Size(460, 140)
+$optionsGroup.Text = "Options"
+$optionsGroup.ForeColor = [System.Drawing.Color]::White
+$optionsGroup.BackColor = [System.Drawing.Color]::Transparent
+$form.Controls.Add($optionsGroup)
 
-if %errorlevel% NEQ 0 (
-    echo [%COLOR_SUCCESS%] New update found! Applying update...
-    copy /y "%tempFile%" "%~f0" >nul
-    echo [%COLOR_SUCCESS%] Script updated! Restarting...
-    del "%tempFile%" >nul 2>&1
-    timeout /t 1 >nul
-    start "" "%~f0"
-    exit
-) else (
-    echo [%COLOR_SUCCESS%] You are already on the latest version.
-    del "%tempFile%" >nul 2>&1
-)
+# Check for updates checkbox
+$chkUpdate = New-Object System.Windows.Forms.CheckBox
+$chkUpdate.Location = New-Object System.Drawing.Point(20, 30)
+$chkUpdate.Size = New-Object System.Drawing.Size(420, 20)
+$chkUpdate.Text = "Check for script updates before fixing"
+$chkUpdate.Checked = $true
+$chkUpdate.ForeColor = [System.Drawing.Color]::White
+$optionsGroup.Controls.Add($chkUpdate)
 
-cls
-echo [%COLOR_PROCESS%] ============================
-echo [%COLOR_PROCESS%]      Discord Voice Module Auto-Fixer
-echo [%COLOR_PROCESS%] ============================%RESET%
-echo.
+# Auto-apply updates checkbox
+$chkAutoUpdate = New-Object System.Windows.Forms.CheckBox
+$chkAutoUpdate.Location = New-Object System.Drawing.Point(40, 50)
+$chkAutoUpdate.Size = New-Object System.Drawing.Size(400, 20)
+$chkAutoUpdate.Text = "Automatically download and apply updates"
+$chkAutoUpdate.Checked = $true
+$chkAutoUpdate.ForeColor = [System.Drawing.Color]::LightGray
+$chkAutoUpdate.Enabled = $true
+$optionsGroup.Controls.Add($chkAutoUpdate)
 
-echo [%COLOR_PROCESS%] Quitting Discord...
-taskkill /F /IM discord.exe >nul 2>&1
-taskkill /F /IM Update.exe >nul 2>&1
-timeout /t 1 >nul
+# Create startup shortcut checkbox
+$chkShortcut = New-Object System.Windows.Forms.CheckBox
+$chkShortcut.Location = New-Object System.Drawing.Point(20, 75)
+$chkShortcut.Size = New-Object System.Drawing.Size(420, 20)
+$chkShortcut.Text = "Create startup shortcut (run fixer on Windows startup)"
+$chkShortcut.Checked = $false
+$chkShortcut.ForeColor = [System.Drawing.Color]::White
+$optionsGroup.Controls.Add($chkShortcut)
 
-set "base=%LOCALAPPDATA%\Discord"
-set "appPath="
-for /f "delims=" %%A in ('dir "%base%\app-*" /b /ad-h /o-n') do (
-    if exist "%base%\%%A\modules" (
-        for /d %%B in ("%base%\%%A\modules\discord_voice*") do (
-            set "appPath=%base%\%%A"
-            goto :foundApp
-        )
-    )
-)
-if not defined appPath (
-    echo [%COLOR_ERROR%] No app-* folder with voice module found.
-    pause
-    exit /b
-)
-:foundApp
-echo [%COLOR_SUCCESS%] Using Discord folder: %CYAN%%appPath%%RESET%
-echo.
+# Auto-start Discord checkbox
+$chkAutoStart = New-Object System.Windows.Forms.CheckBox
+$chkAutoStart.Location = New-Object System.Drawing.Point(20, 100)
+$chkAutoStart.Size = New-Object System.Drawing.Size(420, 20)
+$chkAutoStart.Text = "Automatically start Discord after fixing"
+$chkAutoStart.Checked = $true
+$chkAutoStart.ForeColor = [System.Drawing.Color]::White
+$optionsGroup.Controls.Add($chkAutoStart)
 
-set "voiceModule="
-for /D %%C in ("%appPath%\modules\discord_voice*") do (
-    set "voiceModule=%%C"
-    goto :foundVoice
-)
-if not defined voiceModule (
-    echo [%COLOR_ERROR%] No discord_voice module found.
-    pause
-    exit /b
-)
-:foundVoice
-if exist "%voiceModule%\discord_voice" (
-    set "targetVoiceFolder=%voiceModule%\discord_voice"
-) else (
-    set "targetVoiceFolder=%voiceModule%"
-)
+# Progress/Status RichTextBox (supports colors)
+$statusBox = New-Object System.Windows.Forms.RichTextBox
+$statusBox.Location = New-Object System.Drawing.Point(10, 230)
+$statusBox.Size = New-Object System.Drawing.Size(460, 150)
+$statusBox.ReadOnly = $true
+$statusBox.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)  # Discord darker background
+$statusBox.ForeColor = [System.Drawing.Color]::White
+$statusBox.Font = New-Object System.Drawing.Font("Consolas", 9)
+$statusBox.DetectUrls = $false
+$form.Controls.Add($statusBox)
 
-echo [%COLOR_PROCESS%] Removing old voice module files...
-if exist "%targetVoiceFolder%" (
-    del /q "%targetVoiceFolder%\*" >nul 2>&1
-    for /d %%D in ("%targetVoiceFolder%\*") do rd /s /q "%%D" >nul 2>&1
-)
-timeout /t 1 >nul
+# Progress Bar
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(10, 390)
+$progressBar.Size = New-Object System.Drawing.Size(460, 20)
+$progressBar.Style = "Continuous"
+$form.Controls.Add($progressBar)
 
-set "scriptDir=%~dp0"
-set "sourceBackup="
-for /d %%F in ("%scriptDir%Discord*Backup") do (
-    set "sourceBackup=%%F"
-    goto :foundBackup
-)
-echo [%COLOR_ERROR%] Backup folder not found next to the script.
-pause
-exit /b
-:foundBackup
-echo [%COLOR_SUCCESS%] Backup folder: %sourceBackup%
-echo.
+# Start Button
+$btnStart = New-Object System.Windows.Forms.Button
+$btnStart.Location = New-Object System.Drawing.Point(180, 420)
+$btnStart.Size = New-Object System.Drawing.Size(120, 35)
+$btnStart.Text = "Start Fix"
+$btnStart.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$btnStart.BackColor = [System.Drawing.Color]::FromArgb(88, 101, 242)  # Discord blurple
+$btnStart.ForeColor = [System.Drawing.Color]::White
+$btnStart.FlatStyle = "Flat"
+$btnStart.FlatAppearance.BorderSize = 0
+$btnStart.Cursor = [System.Windows.Forms.Cursors]::Hand
+$form.Controls.Add($btnStart)
 
-echo [%COLOR_PROCESS%] Copying updated module files...
-robocopy "%sourceBackup%" "%targetVoiceFolder%" /MIR /COPY:DAT /R:2 /W:2 /NJH /NJS /NFL /NDL /NC /NS >nul 2>&1
-call :progressBar "Updating module files..."
+# Add event to enable/disable auto-update checkbox
+$chkUpdate.Add_CheckedChanged({
+    $chkAutoUpdate.Enabled = $chkUpdate.Checked
+    if (-not $chkUpdate.Checked) {
+        $chkAutoUpdate.Checked = $false
+    }
+})
+function Add-Status {
+    param($message, $color = "White")
+    $timestamp = Get-Date -Format "HH:mm:ss"
+    $statusBox.SelectionStart = $statusBox.TextLength
+    $statusBox.SelectionLength = 0
+    $statusBox.SelectionColor = [System.Drawing.Color]::FromName($color)
+    $statusBox.AppendText("[$timestamp] $message`r`n")
+    $statusBox.ScrollToCaret()
+    $form.Refresh()
+}
 
-set "ffmpegSource="
-for /r "%scriptDir%" %%F in (ffmpeg.dll) do (
-    set "ffmpegSource=%%F"
-    goto :foundFFMPEG
-)
-echo [%COLOR_ERROR%] ffmpeg.dll not found.
-pause
-exit /b
-:foundFFMPEG
-echo [%COLOR_SUCCESS%] ffmpeg.dll found at %ffmpegSource%
-set "ffmpegTarget=%appPath%\ffmpeg.dll"
-copy /y "%ffmpegSource%" "%ffmpegTarget%" >nul
-if %errorlevel%==0 (
-    echo [%COLOR_SUCCESS%] ffmpeg.dll replaced.
-) else (
-    echo [%COLOR_ERROR%] Failed to copy ffmpeg.dll.
-)
+# Function to update progress
+function Update-Progress {
+    param($value)
+    $progressBar.Value = $value
+    $form.Refresh()
+}
 
-echo [%COLOR_PROCESS%] Creating startup shortcut...
-set "startupFolder=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-set "shortcutPath=%startupFolder%\DiscordVoiceFixer.lnk"
-set "batchPath=%~f0"
+# Button Click Event
+$btnStart.Add_Click({
+    $btnStart.Enabled = $false
+    $statusBox.Clear()
+    $progressBar.Value = 0
+    
+    try {
+        # Step 1: Check for updates if selected
+        if ($chkUpdate.Checked) {
+            Add-Status "Checking for script updates..." "Blue"
+            Update-Progress 5
+            
+            try {
+                $updateURL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.bat"
+                $tempFile = "$env:TEMP\stereo_update.tmp"
+                $currentScript = $PSCommandPath
+                
+                Invoke-WebRequest -Uri $updateURL -OutFile $tempFile -UseBasicParsing
+                
+                if (Compare-Object (Get-Content $tempFile) (Get-Content $currentScript)) {
+                    Add-Status "New update found!" "Yellow"
+                    
+                    if ($chkAutoUpdate.Checked) {
+                        Add-Status "Downloading and applying update..." "Cyan"
+                        Copy-Item -Path $tempFile -Destination $currentScript -Force
+                        Add-Status "✓ Update applied successfully! Please restart the script." "LimeGreen"
+                        Remove-Item $tempFile -ErrorAction SilentlyContinue
+                        
+                        $result = [System.Windows.Forms.MessageBox]::Show(
+                            "Script has been updated! The application will now close. Please run the script again to use the new version.",
+                            "Update Complete",
+                            [System.Windows.Forms.MessageBoxButtons]::OK,
+                            [System.Windows.Forms.MessageBoxIcon]::Information
+                        )
+                        $form.Close()
+                        return
+                    } else {
+                        Add-Status "Please download the update manually from GitHub." "Orange"
+                        Remove-Item $tempFile -ErrorAction SilentlyContinue
+                    }
+                } else {
+                    Add-Status "✓ You are on the latest version" "LimeGreen"
+                    Remove-Item $tempFile -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Add-Status "⚠ Could not check for updates: $($_.Exception.Message)" "Orange"
+            }
+        }
+        
+        Update-Progress 10
+        
+        # Step 2: Kill Discord
+        Add-Status "Closing Discord processes..." "Blue"
+        
+        # Determine which Discord processes to kill based on client selection
+        $processNames = switch ($clientCombo.SelectedIndex) {
+            0 { @("Discord", "Update") }  # Stable
+            1 { @("DiscordPTB", "Update") }  # PTB
+            2 { @("DiscordCanary", "Update") }  # Canary
+            3 { @("DiscordDevelopment", "Update") }  # Development
+            4 { @("Vencord", "Discord", "Update") }  # Vencord (may use Discord process)
+        }
+        
+        foreach ($proc in $processNames) {
+            Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force
+        }
+        Start-Sleep -Seconds 1
+        Update-Progress 20
+        Add-Status "✓ Discord processes closed" "LimeGreen"
+        
+        # Step 3: Find Discord installation
+        Add-Status "Locating Discord installation..." "Blue"
+        
+        # Determine base path based on client
+        $base = switch ($clientCombo.SelectedIndex) {
+            0 { "$env:LOCALAPPDATA\Discord" }  # Stable
+            1 { "$env:LOCALAPPDATA\DiscordPTB" }  # PTB
+            2 { "$env:LOCALAPPDATA\DiscordCanary" }  # Canary
+            3 { "$env:LOCALAPPDATA\DiscordDevelopment" }  # Development
+            4 { 
+                # Vencord can be in multiple locations
+                if (Test-Path "$env:LOCALAPPDATA\Vencord") {
+                    "$env:LOCALAPPDATA\Vencord"
+                } else {
+                    "$env:LOCALAPPDATA\Discord"
+                }
+            }
+        }
+        
+        if (-not (Test-Path $base)) {
+            throw "Discord client folder not found at: $base"
+        }
+        
+        $appPath = $null
+        
+        $appFolders = Get-ChildItem -Path $base -Filter "app-*" -Directory | Sort-Object Name -Descending
+        foreach ($folder in $appFolders) {
+            $modulesPath = Join-Path $folder.FullName "modules"
+            if (Test-Path $modulesPath) {
+                $voiceModules = Get-ChildItem -Path $modulesPath -Filter "discord_voice*" -Directory
+                if ($voiceModules) {
+                    $appPath = $folder.FullName
+                    break
+                }
+            }
+        }
+        
+        if (-not $appPath) {
+            throw "No Discord app folder with voice module found"
+        }
+        
+        Add-Status "✓ Found Discord at: $appPath" "LimeGreen"
+        Update-Progress 30
+        
+        # Step 4: Find voice module
+        Add-Status "Locating voice module..." "Blue"
+        $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        
+        if (-not $voiceModule) {
+            throw "No discord_voice module found"
+        }
+        
+        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
+            "$($voiceModule.FullName)\discord_voice"
+        } else {
+            $voiceModule.FullName
+        }
+        
+        Add-Status "✓ Voice module located" "LimeGreen"
+        Update-Progress 40
+        
+        # Step 5: Clear old files
+        Add-Status "Removing old voice module files..." "Blue"
+        if (Test-Path $targetVoiceFolder) {
+            Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Add-Status "✓ Old files removed" "LimeGreen"
+        Update-Progress 50
+        
+        # Step 6: Find backup folder
+        Add-Status "Searching for backup folder..." "Blue"
+        $scriptDir = Split-Path -Parent $PSCommandPath
+        $sourceBackup = Get-ChildItem -Path $scriptDir -Filter "Discord*Backup" -Directory | Select-Object -First 1
+        
+        if (-not $sourceBackup) {
+            throw "Backup folder not found next to script"
+        }
+        
+        Add-Status "✓ Backup found: $($sourceBackup.Name)" "LimeGreen"
+        Update-Progress 60
+        
+        # Step 7: Copy files
+        Add-Status "Copying updated module files..." "Blue"
+        Copy-Item -Path "$($sourceBackup.FullName)\*" -Destination $targetVoiceFolder -Recurse -Force
+        Add-Status "✓ Module files copied" "LimeGreen"
+        Update-Progress 70
+        
+        # Step 8: Copy ffmpeg.dll
+        Add-Status "Locating and copying ffmpeg.dll..." "Blue"
+        $ffmpegSource = Get-ChildItem -Path $scriptDir -Filter "ffmpeg.dll" -Recurse | Select-Object -First 1
+        
+        if (-not $ffmpegSource) {
+            throw "ffmpeg.dll not found"
+        }
+        
+        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
+        Copy-Item -Path $ffmpegSource.FullName -Destination $ffmpegTarget -Force
+        Add-Status "✓ ffmpeg.dll replaced" "LimeGreen"
+        Update-Progress 80
+        
+        # Step 9: Create startup shortcut if selected
+        if ($chkShortcut.Checked) {
+            Add-Status "Creating startup shortcut..." "Blue"
+            $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+            $shortcutPath = Join-Path $startupFolder "DiscordVoiceFixer.lnk"
+            
+            $WshShell = New-Object -ComObject WScript.Shell
+            $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+            $Shortcut.TargetPath = $PSCommandPath
+            $Shortcut.WorkingDirectory = $scriptDir
+            $Shortcut.Save()
+            
+            Add-Status "✓ Startup shortcut created" "LimeGreen"
+        }
+        Update-Progress 90
+        
+        # Step 10: Start Discord if selected
+        if ($chkAutoStart.Checked) {
+            Add-Status "Starting Discord..." "Blue"
+            
+            # Determine executable name based on client
+            $exeName = switch ($clientCombo.SelectedIndex) {
+                0 { "Discord.exe" }
+                1 { "DiscordPTB.exe" }
+                2 { "DiscordCanary.exe" }
+                3 { "DiscordDevelopment.exe" }
+                4 { "Vencord.exe" }
+            }
+            
+            $discordExe = Join-Path $appPath $exeName
+            if (Test-Path $discordExe) {
+                Start-Process $discordExe
+                Add-Status "✓ Discord started" "LimeGreen"
+            } else {
+                Add-Status "⚠ Could not find $exeName" "Orange"
+            }
+        }
+        
+        Update-Progress 100
+        Add-Status "" "White"
+        Add-Status "=== ALL TASKS COMPLETED ===" "LimeGreen"
+        [System.Windows.Forms.MessageBox]::Show("Discord voice module fix completed successfully!", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        
+    } catch {
+        Add-Status "" "Black"
+        Add-Status "✗ ERROR: $($_.Exception.Message)" "Red"
+        [System.Windows.Forms.MessageBox]::Show("An error occurred: $($_.Exception.Message)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    } finally {
+        $btnStart.Enabled = $true
+    }
+})
 
-set "vbsFile=%temp%\createShortcut.vbs"
-(
-echo Set WshShell = WScript.CreateObject("WScript.Shell"^)
-echo Set Shortcut = WshShell.CreateShortcut("%shortcutPath%"^)
-echo Shortcut.TargetPath = "%batchPath%"
-echo Shortcut.WorkingDirectory = "%~dp0"
-echo Shortcut.WindowStyle = 1
-echo Shortcut.Save
-) > "%vbsFile%"
-
-cscript //nologo "%vbsFile%" >nul
-del "%vbsFile%" >nul
-
-echo [%COLOR_SUCCESS%] Startup shortcut created.
-echo.
-
-echo [%COLOR_PROCESS%] Starting Discord...
-start "" "%appPath%\Discord.exe"
-echo [%COLOR_DONE%] All tasks completed.
-timeout /t 2 >nul
-exit
+# Show the form
+$form.Add_Shown({$form.Activate()})
+[void]$form.ShowDialog()

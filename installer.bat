@@ -9,20 +9,19 @@ set "COLOR_DONE=DONE"
 set "RESET="
 
 echo [%COLOR_UPDATE%] Checking for updates...
+pause
 
 set "updateURL=https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.bat"
 set "tempFile=%temp%\stereo_update.tmp"
 
 echo [%COLOR_UPDATE%] Downloading latest script from GitHub...
 curl -L "%updateURL%" -o "%tempFile%"
-if not exist "%tempFile%" (
-    echo [%COLOR_ERROR%] Failed to download update info.
-    pause
-    exit /b
-)
+echo Downloaded file: "%temp%\stereo_update.tmp"
 
-echo [%COLOR_UPDATE%] Comparing local script to GitHub version...
+echo [%COLOR_UPDATE%] Comparing scripts...
 fc "%tempFile%" "%~f0" >nul
+echo Error level after fc: %errorlevel%
+
 if %errorlevel% NEQ 0 (
     echo [%COLOR_SUCCESS%] New update found! Applying update...
     copy /y "%tempFile%" "%~f0" >nul
@@ -30,7 +29,7 @@ if %errorlevel% NEQ 0 (
     del "%tempFile%" >nul 2>&1
     timeout /t 1 >nul
     start "" "%~f0"
-    exit /b
+    exit
 ) else (
     echo [%COLOR_SUCCESS%] You are already on the latest version.
     del "%tempFile%" >nul 2>&1

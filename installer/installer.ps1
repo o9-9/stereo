@@ -26,7 +26,7 @@ $form.Controls.Add($titleLabel)
 $creditsLabel = New-Object System.Windows.Forms.Label
 $creditsLabel.Location = New-Object System.Drawing.Point(20, 52)
 $creditsLabel.Size = New-Object System.Drawing.Size(460, 28)
-$creditsLabel.Text = "Made by`r`nOracle | Shaun | Terrain | Hallow"
+$creditsLabel.Text = "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend"
 $creditsLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
 $creditsLabel.TextAlign = "MiddleCenter"
 $creditsLabel.ForeColor = [System.Drawing.Color]::FromArgb(150, 150, 150)

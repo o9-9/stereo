@@ -146,8 +146,7 @@ echo [%COLOR_SUCCESS%] Startup shortcut created.
 echo.
 
 echo [%COLOR_PROCESS%] Starting Discord...
-start "" "%appPath%\Discord.exe" >nul 2>&1
-
+start "" "%appPath%\Discord.exe"
 echo [%COLOR_DONE%] All tasks completed.
 timeout /t 2 >nul
 exit

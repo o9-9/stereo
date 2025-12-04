@@ -8,7 +8,7 @@ $form.Size = New-Object System.Drawing.Size(500, 500)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
-$form.BackColor = [System.Drawing.Color]::FromArgb(32, 34, 37)  # Discord dark background
+$form.BackColor = [System.Drawing.Color]::FromArgb(32, 34, 37)
 
 # Title Label
 $titleLabel = New-Object System.Windows.Forms.Label
@@ -21,7 +21,7 @@ $titleLabel.ForeColor = [System.Drawing.Color]::White
 $titleLabel.BackColor = [System.Drawing.Color]::Transparent
 $form.Controls.Add($titleLabel)
 
-# Discord Client Selection (moved above options box)
+# Discord Client Selection
 $clientLabel = New-Object System.Windows.Forms.Label
 $clientLabel.Location = New-Object System.Drawing.Point(10, 50)
 $clientLabel.Size = New-Object System.Drawing.Size(100, 20)
@@ -90,12 +90,12 @@ $chkAutoStart.Checked = $true
 $chkAutoStart.ForeColor = [System.Drawing.Color]::White
 $optionsGroup.Controls.Add($chkAutoStart)
 
-# Progress/Status RichTextBox (supports colors)
+# Progress/Status RichTextBox
 $statusBox = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Location = New-Object System.Drawing.Point(10, 230)
 $statusBox.Size = New-Object System.Drawing.Size(460, 150)
 $statusBox.ReadOnly = $true
-$statusBox.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)  # Discord darker background
+$statusBox.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)
 $statusBox.ForeColor = [System.Drawing.Color]::White
 $statusBox.Font = New-Object System.Drawing.Font("Consolas", 9)
 $statusBox.DetectUrls = $false
@@ -114,7 +114,7 @@ $btnStart.Location = New-Object System.Drawing.Point(180, 420)
 $btnStart.Size = New-Object System.Drawing.Size(120, 35)
 $btnStart.Text = "Start Fix"
 $btnStart.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$btnStart.BackColor = [System.Drawing.Color]::FromArgb(88, 101, 242)  # Discord blurple
+$btnStart.BackColor = [System.Drawing.Color]::FromArgb(88, 101, 242)
 $btnStart.ForeColor = [System.Drawing.Color]::White
 $btnStart.FlatStyle = "Flat"
 $btnStart.FlatAppearance.BorderSize = 0
@@ -128,6 +128,8 @@ $chkUpdate.Add_CheckedChanged({
         $chkAutoUpdate.Checked = $false
     }
 })
+
+# Function to add status messages
 function Add-Status {
     param($message, $color = "White")
     $timestamp = Get-Date -Format "HH:mm:ss"
@@ -159,7 +161,7 @@ $btnStart.Add_Click({
             Update-Progress 5
             
             try {
-                $updateURL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.bat"
+                $updateURL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.ps1"
                 $tempFile = "$env:TEMP\stereo_update.tmp"
                 $currentScript = $PSCommandPath
                 
@@ -200,13 +202,12 @@ $btnStart.Add_Click({
         # Step 2: Kill Discord
         Add-Status "Closing Discord processes..." "Blue"
         
-        # Determine which Discord processes to kill based on client selection
         $processNames = switch ($clientCombo.SelectedIndex) {
-            0 { @("Discord", "Update") }  # Stable
-            1 { @("DiscordPTB", "Update") }  # PTB
-            2 { @("DiscordCanary", "Update") }  # Canary
-            3 { @("DiscordDevelopment", "Update") }  # Development
-            4 { @("Vencord", "Discord", "Update") }  # Vencord (may use Discord process)
+            0 { @("Discord", "Update") }
+            1 { @("DiscordPTB", "Update") }
+            2 { @("DiscordCanary", "Update") }
+            3 { @("DiscordDevelopment", "Update") }
+            4 { @("Vencord", "Discord", "Update") }
         }
         
         foreach ($proc in $processNames) {
@@ -219,14 +220,12 @@ $btnStart.Add_Click({
         # Step 3: Find Discord installation
         Add-Status "Locating Discord installation..." "Blue"
         
-        # Determine base path based on client
         $base = switch ($clientCombo.SelectedIndex) {
-            0 { "$env:LOCALAPPDATA\Discord" }  # Stable
-            1 { "$env:LOCALAPPDATA\DiscordPTB" }  # PTB
-            2 { "$env:LOCALAPPDATA\DiscordCanary" }  # Canary
-            3 { "$env:LOCALAPPDATA\DiscordDevelopment" }  # Development
+            0 { "$env:LOCALAPPDATA\Discord" }
+            1 { "$env:LOCALAPPDATA\DiscordPTB" }
+            2 { "$env:LOCALAPPDATA\DiscordCanary" }
+            3 { "$env:LOCALAPPDATA\DiscordDevelopment" }
             4 { 
-                # Vencord can be in multiple locations
                 if (Test-Path "$env:LOCALAPPDATA\Vencord") {
                     "$env:LOCALAPPDATA\Vencord"
                 } else {
@@ -240,7 +239,6 @@ $btnStart.Add_Click({
         }
         
         $appPath = $null
-        
         $appFolders = Get-ChildItem -Path $base -Filter "app-*" -Directory | Sort-Object Name -Descending
         foreach ($folder in $appFolders) {
             $modulesPath = Join-Path $folder.FullName "modules"
@@ -336,7 +334,6 @@ $btnStart.Add_Click({
         if ($chkAutoStart.Checked) {
             Add-Status "Starting Discord..." "Blue"
             
-            # Determine executable name based on client
             $exeName = switch ($clientCombo.SelectedIndex) {
                 0 { "Discord.exe" }
                 1 { "DiscordPTB.exe" }
@@ -360,7 +357,7 @@ $btnStart.Add_Click({
         [System.Windows.Forms.MessageBox]::Show("Discord voice module fix completed successfully!", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
         
     } catch {
-        Add-Status "" "Black"
+        Add-Status "" "White"
         Add-Status "✗ ERROR: $($_.Exception.Message)" "Red"
         [System.Windows.Forms.MessageBox]::Show("An error occurred: $($_.Exception.Message)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
     } finally {

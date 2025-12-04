@@ -10,7 +10,7 @@ set "RESET="
 
 echo [%COLOR_UPDATE%] Checking for updates...
 
-set "updateURL=https://raw.githubusercontent.com/ProdHallow/StereoInstaller/refs/heads/main/installer"
+set "updateURL=https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.bat"
 set "tempFile=%temp%\stereo_update.tmp"
 
 echo [%COLOR_UPDATE%] Downloading latest script from GitHub...

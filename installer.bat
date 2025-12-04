@@ -21,21 +21,23 @@ if not exist "%tempFile%" (
     exit /b
 )
 
-echo [%COLOR_UPDATE%] Comparing local script to GitHub version...
-fc "%tempFile%" "%~f0" >nul
+echo [%COLOR_UPDATE%] Downloaded to: %temp%\stereo_update.tmp
+pause
+
+echo [%COLOR_UPDATE%] Comparing local script to downloaded version...
+fc "%temp%\stereo_update.tmp" "%~f0" >nul
 if %errorlevel% NEQ 0 (
     echo [%COLOR_SUCCESS%] New update found! Applying update...
-    copy /y "%tempFile%" "%~f0" >nul
+    copy /y "%temp%\stereo_update.tmp" "%~f0" >nul
     echo [%COLOR_SUCCESS%] Script updated! Restarting...
-    del "%tempFile%" >nul 2>&1
+    del "%temp%\stereo_update.tmp" >nul
     timeout /t 1 >nul
     start "" "%~f0"
-    exit /b
+    exit
 ) else (
     echo [%COLOR_SUCCESS%] You are already on the latest version.
-    del "%tempFile%" >nul 2>&1
+    del "%temp%\stereo_update.tmp" >nul
 )
-
 cls
 echo [%COLOR_PROCESS%] ============================
 echo [%COLOR_PROCESS%]      Discord Voice Module Auto-Fixer

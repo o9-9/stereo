@@ -14,8 +14,7 @@ set "updateURL=https://raw.githubusercontent.com/ProdHallow/installer/refs/heads
 set "tempFile=%temp%\stereo_update.tmp"
 
 echo [%COLOR_UPDATE%] Downloading latest script from GitHub...
-powershell -Command "try { Invoke-WebRequest -Uri '%updateURL%' -OutFile '%tempFile%' -UseBasicParsing } catch { exit 1 }"
-
+curl -L "%updateURL%" -o "%tempFile%"
 if not exist "%tempFile%" (
     echo [%COLOR_ERROR%] Failed to download update info.
     pause

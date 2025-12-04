@@ -21,23 +21,21 @@ if not exist "%tempFile%" (
     exit /b
 )
 
-echo [%COLOR_UPDATE%] Downloaded to: %temp%\stereo_update.tmp
-pause
-
-echo [%COLOR_UPDATE%] Comparing local script to downloaded version...
-fc "%temp%\stereo_update.tmp" "%~f0" >nul
+echo [%COLOR_UPDATE%] Comparing local script to GitHub version...
+fc "%tempFile%" "%~f0" >nul
 if %errorlevel% NEQ 0 (
     echo [%COLOR_SUCCESS%] New update found! Applying update...
-    copy /y "%temp%\stereo_update.tmp" "%~f0" >nul
+    copy /y "%tempFile%" "%~f0" >nul
     echo [%COLOR_SUCCESS%] Script updated! Restarting...
-    del "%temp%\stereo_update.tmp" >nul
+    del "%tempFile%" >nul 2>&1
     timeout /t 1 >nul
     start "" "%~f0"
-    exit
+    exit /b
 ) else (
     echo [%COLOR_SUCCESS%] You are already on the latest version.
-    del "%temp%\stereo_update.tmp" >nul
+    del "%tempFile%" >nul 2>&1
 )
+
 cls
 echo [%COLOR_PROCESS%] ============================
 echo [%COLOR_PROCESS%]      Discord Voice Module Auto-Fixer
@@ -149,10 +147,11 @@ echo [%COLOR_SUCCESS%] Startup shortcut created.
 echo.
 
 echo [%COLOR_PROCESS%] Starting Discord...
-start "" /b "%appPath%\Discord.exe"
+start "" "%appPath%\Discord.exe" >nul 2>&1
 
 echo [%COLOR_DONE%] All tasks completed.
 timeout /t 2 >nul
+pause
 exit /b
 
 :progressBar

@@ -334,12 +334,13 @@ $btnStart.Add_Click({
         if ($chkAutoStart.Checked) {
             Add-Status "Starting Discord..." "Blue"
             
+            # Vencord uses the regular Discord executable
             $exeName = switch ($clientCombo.SelectedIndex) {
                 0 { "Discord.exe" }
                 1 { "DiscordPTB.exe" }
                 2 { "DiscordCanary.exe" }
                 3 { "DiscordDevelopment.exe" }
-                4 { "Vencord.exe" }
+                4 { "Discord.exe" }  # Vencord uses Discord.exe
             }
             
             $discordExe = Join-Path $appPath $exeName
@@ -347,7 +348,24 @@ $btnStart.Add_Click({
                 Start-Process $discordExe
                 Add-Status "✓ Discord started" "LimeGreen"
             } else {
-                Add-Status "⚠ Could not find $exeName" "Orange"
+                # Try alternate location for Vencord
+                if ($clientCombo.SelectedIndex -eq 4) {
+                    $altPath = "$env:LOCALAPPDATA\Discord"
+                    $appFolders = Get-ChildItem -Path $altPath -Filter "app-*" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+                    if ($appFolders) {
+                        $altExe = Join-Path $appFolders.FullName "Discord.exe"
+                        if (Test-Path $altExe) {
+                            Start-Process $altExe
+                            Add-Status "✓ Discord started (from alternate location)" "LimeGreen"
+                        } else {
+                            Add-Status "⚠ Could not find Discord.exe for Vencord" "Orange"
+                        }
+                    } else {
+                        Add-Status "⚠ Could not find Discord installation for Vencord" "Orange"
+                    }
+                } else {
+                    Add-Status "⚠ Could not find $exeName" "Orange"
+                }
             }
         }
         

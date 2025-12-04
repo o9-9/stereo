@@ -3,117 +3,138 @@ Add-Type -AssemblyName System.Drawing
 
 # Create the main form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Discord Voice Module Auto-Fixer"
-$form.Size = New-Object System.Drawing.Size(500, 500)
+$form.Text = "Stereo Installer"
+$form.Size = New-Object System.Drawing.Size(520, 550)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.BackColor = [System.Drawing.Color]::FromArgb(32, 34, 37)
+$form.TopMost = $true
 
 # Title Label
 $titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Location = New-Object System.Drawing.Point(10, 10)
-$titleLabel.Size = New-Object System.Drawing.Size(460, 30)
-$titleLabel.Text = "Discord Voice Module Auto-Fixer"
-$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$titleLabel.Location = New-Object System.Drawing.Point(20, 15)
+$titleLabel.Size = New-Object System.Drawing.Size(460, 35)
+$titleLabel.Text = "Stereo Installer"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
 $titleLabel.TextAlign = "MiddleCenter"
 $titleLabel.ForeColor = [System.Drawing.Color]::White
 $titleLabel.BackColor = [System.Drawing.Color]::Transparent
 $form.Controls.Add($titleLabel)
 
-# Discord Client Selection
-$clientLabel = New-Object System.Windows.Forms.Label
-$clientLabel.Location = New-Object System.Drawing.Point(10, 50)
-$clientLabel.Size = New-Object System.Drawing.Size(100, 20)
-$clientLabel.Text = "Discord Client:"
-$clientLabel.ForeColor = [System.Drawing.Color]::White
-$form.Controls.Add($clientLabel)
+# Credits Label
+$creditsLabel = New-Object System.Windows.Forms.Label
+$creditsLabel.Location = New-Object System.Drawing.Point(20, 52)
+$creditsLabel.Size = New-Object System.Drawing.Size(460, 28)
+$creditsLabel.Text = "Made by`r`nOracle | Shaun | Terrain | Hallow"
+$creditsLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+$creditsLabel.TextAlign = "MiddleCenter"
+$creditsLabel.ForeColor = [System.Drawing.Color]::FromArgb(150, 150, 150)
+$creditsLabel.BackColor = [System.Drawing.Color]::Transparent
+$form.Controls.Add($creditsLabel)
+
+# Discord Client GroupBox
+$clientGroup = New-Object System.Windows.Forms.GroupBox
+$clientGroup.Location = New-Object System.Drawing.Point(20, 90)
+$clientGroup.Size = New-Object System.Drawing.Size(460, 60)
+$clientGroup.Text = "Discord Client"
+$clientGroup.ForeColor = [System.Drawing.Color]::White
+$clientGroup.BackColor = [System.Drawing.Color]::Transparent
+$clientGroup.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.Controls.Add($clientGroup)
 
 $clientCombo = New-Object System.Windows.Forms.ComboBox
-$clientCombo.Location = New-Object System.Drawing.Point(110, 48)
-$clientCombo.Size = New-Object System.Drawing.Size(200, 25)
+$clientCombo.Location = New-Object System.Drawing.Point(20, 25)
+$clientCombo.Size = New-Object System.Drawing.Size(420, 28)
 $clientCombo.DropDownStyle = "DropDownList"
 $clientCombo.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)
 $clientCombo.ForeColor = [System.Drawing.Color]::White
 $clientCombo.FlatStyle = "Flat"
+$clientCombo.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 [void]$clientCombo.Items.Add("Discord (Stable)")
 [void]$clientCombo.Items.Add("Discord PTB")
 [void]$clientCombo.Items.Add("Discord Canary")
 [void]$clientCombo.Items.Add("Discord Development")
 [void]$clientCombo.Items.Add("Vencord")
 $clientCombo.SelectedIndex = 0
-$form.Controls.Add($clientCombo)
+$clientGroup.Controls.Add($clientCombo)
 
 # Options GroupBox
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
-$optionsGroup.Location = New-Object System.Drawing.Point(10, 80)
-$optionsGroup.Size = New-Object System.Drawing.Size(460, 140)
+$optionsGroup.Location = New-Object System.Drawing.Point(20, 160)
+$optionsGroup.Size = New-Object System.Drawing.Size(460, 135)
 $optionsGroup.Text = "Options"
 $optionsGroup.ForeColor = [System.Drawing.Color]::White
 $optionsGroup.BackColor = [System.Drawing.Color]::Transparent
+$optionsGroup.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $form.Controls.Add($optionsGroup)
 
 # Check for updates checkbox
 $chkUpdate = New-Object System.Windows.Forms.CheckBox
-$chkUpdate.Location = New-Object System.Drawing.Point(20, 30)
-$chkUpdate.Size = New-Object System.Drawing.Size(420, 20)
+$chkUpdate.Location = New-Object System.Drawing.Point(20, 28)
+$chkUpdate.Size = New-Object System.Drawing.Size(420, 22)
 $chkUpdate.Text = "Check for script updates before fixing"
 $chkUpdate.Checked = $true
 $chkUpdate.ForeColor = [System.Drawing.Color]::White
+$chkUpdate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $optionsGroup.Controls.Add($chkUpdate)
 
 # Auto-apply updates checkbox
 $chkAutoUpdate = New-Object System.Windows.Forms.CheckBox
-$chkAutoUpdate.Location = New-Object System.Drawing.Point(40, 50)
-$chkAutoUpdate.Size = New-Object System.Drawing.Size(400, 20)
+$chkAutoUpdate.Location = New-Object System.Drawing.Point(40, 52)
+$chkAutoUpdate.Size = New-Object System.Drawing.Size(400, 22)
 $chkAutoUpdate.Text = "Automatically download and apply updates"
 $chkAutoUpdate.Checked = $true
-$chkAutoUpdate.ForeColor = [System.Drawing.Color]::LightGray
+$chkAutoUpdate.ForeColor = [System.Drawing.Color]::FromArgb(180, 180, 180)
+$chkAutoUpdate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $chkAutoUpdate.Enabled = $true
 $optionsGroup.Controls.Add($chkAutoUpdate)
 
 # Create startup shortcut checkbox
 $chkShortcut = New-Object System.Windows.Forms.CheckBox
-$chkShortcut.Location = New-Object System.Drawing.Point(20, 75)
-$chkShortcut.Size = New-Object System.Drawing.Size(420, 20)
+$chkShortcut.Location = New-Object System.Drawing.Point(20, 76)
+$chkShortcut.Size = New-Object System.Drawing.Size(420, 22)
 $chkShortcut.Text = "Create startup shortcut (run fixer on Windows startup)"
 $chkShortcut.Checked = $false
 $chkShortcut.ForeColor = [System.Drawing.Color]::White
+$chkShortcut.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $optionsGroup.Controls.Add($chkShortcut)
 
 # Auto-start Discord checkbox
 $chkAutoStart = New-Object System.Windows.Forms.CheckBox
 $chkAutoStart.Location = New-Object System.Drawing.Point(20, 100)
-$chkAutoStart.Size = New-Object System.Drawing.Size(420, 20)
+$chkAutoStart.Size = New-Object System.Drawing.Size(420, 22)
 $chkAutoStart.Text = "Automatically start Discord after fixing"
 $chkAutoStart.Checked = $true
 $chkAutoStart.ForeColor = [System.Drawing.Color]::White
+$chkAutoStart.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $optionsGroup.Controls.Add($chkAutoStart)
 
 # Progress/Status RichTextBox
 $statusBox = New-Object System.Windows.Forms.RichTextBox
-$statusBox.Location = New-Object System.Drawing.Point(10, 230)
-$statusBox.Size = New-Object System.Drawing.Size(460, 150)
+$statusBox.Location = New-Object System.Drawing.Point(20, 305)
+$statusBox.Size = New-Object System.Drawing.Size(460, 110)
 $statusBox.ReadOnly = $true
 $statusBox.BackColor = [System.Drawing.Color]::FromArgb(47, 49, 54)
 $statusBox.ForeColor = [System.Drawing.Color]::White
 $statusBox.Font = New-Object System.Drawing.Font("Consolas", 9)
 $statusBox.DetectUrls = $false
+$statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
 # Progress Bar
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(10, 390)
-$progressBar.Size = New-Object System.Drawing.Size(460, 20)
+$progressBar.Location = New-Object System.Drawing.Point(20, 425)
+$progressBar.Size = New-Object System.Drawing.Size(460, 22)
 $progressBar.Style = "Continuous"
 $form.Controls.Add($progressBar)
 
 # Start Button
 $btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Location = New-Object System.Drawing.Point(180, 420)
-$btnStart.Size = New-Object System.Drawing.Size(120, 35)
+$btnStart.Location = New-Object System.Drawing.Point(190, 455)
+$btnStart.Size = New-Object System.Drawing.Size(120, 38)
 $btnStart.Text = "Start Fix"
-$btnStart.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$btnStart.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
 $btnStart.BackColor = [System.Drawing.Color]::FromArgb(88, 101, 242)
 $btnStart.ForeColor = [System.Drawing.Color]::White
 $btnStart.FlatStyle = "Flat"
@@ -210,15 +231,28 @@ $btnStart.Add_Click({
             4 { @("Vencord", "Discord", "Update") }
         }
         
+        $killedAny = $false
         foreach ($proc in $processNames) {
-            Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force
+            $processes = Get-Process -Name $proc -ErrorAction SilentlyContinue
+            if ($processes) {
+                $processes | Stop-Process -Force
+                Add-Status "  Killed $proc process" "Cyan"
+                $killedAny = $true
+            }
         }
+        
+        if (-not $killedAny) {
+            Add-Status "  No Discord processes were running" "Yellow"
+        }
+        
         Start-Sleep -Seconds 1
         Update-Progress 20
         Add-Status "✓ Discord processes closed" "LimeGreen"
         
         # Step 3: Find Discord installation
         Add-Status "Locating Discord installation..." "Blue"
+        
+        $clientName = $clientCombo.SelectedItem
         
         $base = switch ($clientCombo.SelectedIndex) {
             0 { "$env:LOCALAPPDATA\Discord" }
@@ -234,16 +268,23 @@ $btnStart.Add_Click({
             }
         }
         
+        Add-Status "Searching in: $base" "Cyan"
+        
         if (-not (Test-Path $base)) {
-            throw "Discord client folder not found at: $base"
+            throw "Discord client folder not found at: $base`r`nPlease verify $clientName is installed."
         }
         
         $appPath = $null
-        $appFolders = Get-ChildItem -Path $base -Filter "app-*" -Directory | Sort-Object Name -Descending
+        $appFolders = Get-ChildItem -Path $base -Filter "app-*" -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+        
+        if (-not $appFolders) {
+            throw "No app-* folders found in $base`r`nPlease verify $clientName is installed correctly."
+        }
+        
         foreach ($folder in $appFolders) {
             $modulesPath = Join-Path $folder.FullName "modules"
             if (Test-Path $modulesPath) {
-                $voiceModules = Get-ChildItem -Path $modulesPath -Filter "discord_voice*" -Directory
+                $voiceModules = Get-ChildItem -Path $modulesPath -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue
                 if ($voiceModules) {
                     $appPath = $folder.FullName
                     break
@@ -252,10 +293,10 @@ $btnStart.Add_Click({
         }
         
         if (-not $appPath) {
-            throw "No Discord app folder with voice module found"
+            throw "No Discord app folder with voice module found in $base`r`nTried folders: $($appFolders.Name -join ', ')"
         }
         
-        Add-Status "✓ Found Discord at: $appPath" "LimeGreen"
+        Add-Status "✓ Found $clientName at: $appPath" "LimeGreen"
         Update-Progress 30
         
         # Step 4: Find voice module
@@ -345,7 +386,8 @@ $btnStart.Add_Click({
             
             $discordExe = Join-Path $appPath $exeName
             if (Test-Path $discordExe) {
-                Start-Process $discordExe
+                # Launch Discord completely detached using cmd
+                Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start", '""', "`"$discordExe`"" -WindowStyle Hidden
                 Add-Status "✓ Discord started" "LimeGreen"
             } else {
                 # Try alternate location for Vencord
@@ -355,7 +397,7 @@ $btnStart.Add_Click({
                     if ($appFolders) {
                         $altExe = Join-Path $appFolders.FullName "Discord.exe"
                         if (Test-Path $altExe) {
-                            Start-Process $altExe
+                            Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start", '""', "`"$altExe`"" -WindowStyle Hidden
                             Add-Status "✓ Discord started (from alternate location)" "LimeGreen"
                         } else {
                             Add-Status "⚠ Could not find Discord.exe for Vencord" "Orange"
@@ -372,12 +414,31 @@ $btnStart.Add_Click({
         Update-Progress 100
         Add-Status "" "White"
         Add-Status "=== ALL TASKS COMPLETED ===" "LimeGreen"
-        [System.Windows.Forms.MessageBox]::Show("Discord voice module fix completed successfully!", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        
+        # Show success message with form as owner to keep it on top
+        $result = [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "Discord voice module fix completed successfully!",
+            "Success",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+        
+        # Close the form after success
+        $form.Close()
         
     } catch {
         Add-Status "" "White"
         Add-Status "✗ ERROR: $($_.Exception.Message)" "Red"
-        [System.Windows.Forms.MessageBox]::Show("An error occurred: $($_.Exception.Message)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        
+        # Show error message with form as owner to keep it on top
+        [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "An error occurred: $($_.Exception.Message)",
+            "Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        )
     } finally {
         $btnStart.Enabled = $true
     }

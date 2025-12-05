@@ -28,6 +28,8 @@ $DiscordClients = @{
 }
 
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/installer.ps1"
+$VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
+$FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/refs/heads/main/ffmpeg.dll"
 #endregion
 
 #region Helper Functions
@@ -134,6 +136,99 @@ function Start-DiscordClient {
         return $true
     }
     return $false
+}
+
+function Download-VoiceBackupFiles {
+    param(
+        [string]$DestinationPath,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form
+    )
+    
+    try {
+        # Create destination directory if it doesn't exist
+        if (-not (Test-Path $DestinationPath)) {
+            New-Item -Path $DestinationPath -ItemType Directory -Force | Out-Null
+        }
+        
+        # Get list of files from GitHub API
+        Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
+        $response = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30
+        
+        # Download each file
+        $fileCount = 0
+        foreach ($file in $response) {
+            if ($file.type -eq "file") {
+                $fileName = $file.name
+                $downloadUrl = $file.download_url
+                $filePath = Join-Path $DestinationPath $fileName
+                
+                Add-Status $StatusBox $Form "  Downloading: $fileName" "Cyan"
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $filePath -UseBasicParsing -TimeoutSec 30
+                $fileCount++
+            }
+        }
+        
+        Add-Status $StatusBox $Form "  Downloaded $fileCount voice backup files" "Cyan"
+        return $true
+    }
+    catch {
+        Add-Status $StatusBox $Form "  ✗ Failed to download voice backup files: $($_.Exception.Message)" "Red"
+        return $false
+    }
+}
+
+function Download-FFmpeg {
+    param(
+        [string]$DestinationPath,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form
+    )
+    
+    try {
+        Add-Status $StatusBox $Form "  Downloading ffmpeg.dll from GitHub..." "Cyan"
+        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30
+        Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"
+        return $true
+    }
+    catch {
+        Add-Status $StatusBox $Form "  ✗ Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"
+        return $false
+    }
+}
+
+function Apply-ScriptUpdate {
+    param(
+        [string]$UpdatedScriptPath,
+        [string]$CurrentScriptPath
+    )
+    
+    # Create a batch file that will replace the script after it closes
+    $batchFile = Join-Path $env:TEMP "StereoInstaller_Update.bat"
+    
+    $batchContent = @"
+@echo off
+echo Waiting for script to close...
+timeout /t 2 /nobreak >nul
+echo Applying update...
+copy /Y "$UpdatedScriptPath" "$CurrentScriptPath" >nul
+if errorlevel 1 (
+    echo Update failed!
+    pause
+) else (
+    echo Update applied successfully!
+    echo Starting updated script...
+    timeout /t 1 /nobreak >nul
+    start "" powershell.exe -ExecutionPolicy Bypass -File "$CurrentScriptPath"
+)
+del "$UpdatedScriptPath" >nul 2>&1
+del "%~f0" >nul 2>&1
+"@
+    
+    $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
+    
+    # Start the batch file detached
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$batchFile`"" -WindowStyle Hidden
 }
 #endregion
 
@@ -254,6 +349,9 @@ $btnStart.Add_Click({
     $statusBox.Clear()
     $progressBar.Value = 0
     
+    # Create temp directory for downloads
+    $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    
     try {
         $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
         
@@ -263,35 +361,43 @@ $btnStart.Add_Click({
             Update-Progress $progressBar $form 5
             
             try {
-                $tempFile = "$env:TEMP\stereo_update.tmp"
+                $updateFile = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
                 $currentScript = $PSCommandPath
                 
-                Invoke-WebRequest -Uri $UPDATE_URL -OutFile $tempFile -UseBasicParsing -TimeoutSec 10
+                Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
                 
-                if (Compare-Object (Get-Content $tempFile) (Get-Content $currentScript)) {
+                # Compare file contents
+                $updateContent = Get-Content $updateFile -Raw
+                $currentContent = Get-Content $currentScript -Raw
+                
+                if ($updateContent -ne $currentContent) {
                     Add-Status $statusBox $form "New update found!" "Yellow"
                     
                     if ($chkAutoUpdate.Checked) {
-                        Add-Status $statusBox $form "Downloading and applying update..." "Cyan"
-                        Copy-Item -Path $tempFile -Destination $currentScript -Force
-                        Add-Status $statusBox $form "✓ Update applied successfully! Please restart the script." "LimeGreen"
-                        Remove-Item $tempFile -ErrorAction SilentlyContinue
+                        Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
                         
-                        [System.Windows.Forms.MessageBox]::Show(
-                            "Script has been updated! The application will now close. Please run the script again to use the new version.",
-                            "Update Complete",
+                        # Apply update using batch file method
+                        Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
+                        
+                        Add-Status $statusBox $form "✓ Update prepared! Script will restart automatically." "LimeGreen"
+                        
+                        $result = [System.Windows.Forms.MessageBox]::Show(
+                            $form,
+                            "Script update downloaded! The script will close and automatically restart with the new version.",
+                            "Update Ready",
                             [System.Windows.Forms.MessageBoxButtons]::OK,
                             [System.Windows.Forms.MessageBoxIcon]::Information
                         )
                         $form.Close()
                         return
                     } else {
-                        Add-Status $statusBox $form "Please download the update manually from GitHub." "Orange"
+                        Add-Status $statusBox $form "Update downloaded to: $updateFile" "Orange"
+                        Add-Status $statusBox $form "Please manually replace the script file to update." "Orange"
                     }
                 } else {
                     Add-Status $statusBox $form "✓ You are on the latest version" "LimeGreen"
+                    Remove-Item $updateFile -ErrorAction SilentlyContinue
                 }
-                Remove-Item $tempFile -ErrorAction SilentlyContinue
             } catch {
                 Add-Status $statusBox $form "⚠ Could not check for updates: $($_.Exception.Message)" "Orange"
             }
@@ -299,7 +405,32 @@ $btnStart.Add_Click({
         
         Update-Progress $progressBar $form 10
         
-        # Step 2: Kill Discord Processes
+        # Step 2: Download Required Files
+        Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+        
+        # Download voice backup files
+        $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
+        $voiceDownloadSuccess = Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $statusBox -Form $form
+        
+        if (-not $voiceDownloadSuccess) {
+            throw "Failed to download voice backup files from GitHub"
+        }
+        
+        Update-Progress $progressBar $form 20
+        
+        # Download ffmpeg.dll
+        $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
+        $ffmpegDownloadSuccess = Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $statusBox -Form $form
+        
+        if (-not $ffmpegDownloadSuccess) {
+            throw "Failed to download ffmpeg.dll from GitHub"
+        }
+        
+        Add-Status $statusBox $form "✓ All files downloaded successfully" "LimeGreen"
+        Update-Progress $progressBar $form 30
+        
+        # Step 3: Kill Discord Processes
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"
         $killedAny = Stop-DiscordProcesses -ProcessNames $selectedClient.Processes
         
@@ -310,10 +441,10 @@ $btnStart.Add_Click({
         }
         
         Start-Sleep -Seconds 1
-        Update-Progress $progressBar $form 20
+        Update-Progress $progressBar $form 40
         Add-Status $statusBox $form "✓ Discord processes closed" "LimeGreen"
         
-        # Step 3: Locate Installation
+        # Step 4: Locate Installation
         Add-Status $statusBox $form "Locating Discord installation..." "Blue"
         
         $basePath = $selectedClient.Path
@@ -334,9 +465,9 @@ $btnStart.Add_Click({
         }
         
         Add-Status $statusBox $form "✓ Found $($selectedClient.Name) at: $appPath" "LimeGreen"
-        Update-Progress $progressBar $form 30
+        Update-Progress $progressBar $form 50
         
-        # Step 4: Locate Voice Module
+        # Step 5: Locate Voice Module
         Add-Status $statusBox $form "Locating voice module..." "Blue"
         $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
         
@@ -351,46 +482,28 @@ $btnStart.Add_Click({
         }
         
         Add-Status $statusBox $form "✓ Voice module located" "LimeGreen"
-        Update-Progress $progressBar $form 40
+        Update-Progress $progressBar $form 60
         
-        # Step 5: Clear Old Files
+        # Step 6: Clear Old Files
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
         if (Test-Path $targetVoiceFolder) {
             Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
         Add-Status $statusBox $form "✓ Old files removed" "LimeGreen"
-        Update-Progress $progressBar $form 50
-        
-        # Step 6: Find Backup
-        Add-Status $statusBox $form "Searching for backup folder..." "Blue"
-        $scriptDir = Split-Path -Parent $PSCommandPath
-        $sourceBackup = Get-ChildItem -Path $scriptDir -Filter "Discord*Backup" -Directory | Select-Object -First 1
-        
-        if (-not $sourceBackup) {
-            throw "Backup folder not found next to script"
-        }
-        
-        Add-Status $statusBox $form "✓ Backup found: $($sourceBackup.Name)" "LimeGreen"
-        Update-Progress $progressBar $form 60
+        Update-Progress $progressBar $form 70
         
         # Step 7: Copy Module Files
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
-        Copy-Item -Path "$($sourceBackup.FullName)\*" -Destination $targetVoiceFolder -Recurse -Force
+        Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
         Add-Status $statusBox $form "✓ Module files copied" "LimeGreen"
-        Update-Progress $progressBar $form 70
+        Update-Progress $progressBar $form 80
         
         # Step 8: Copy ffmpeg.dll
-        Add-Status $statusBox $form "Locating and copying ffmpeg.dll..." "Blue"
-        $ffmpegSource = Get-ChildItem -Path $scriptDir -Filter "ffmpeg.dll" -Recurse | Select-Object -First 1
-        
-        if (-not $ffmpegSource) {
-            throw "ffmpeg.dll not found"
-        }
-        
+        Add-Status $statusBox $form "Copying ffmpeg.dll..." "Blue"
         $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
-        Copy-Item -Path $ffmpegSource.FullName -Destination $ffmpegTarget -Force
+        Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
         Add-Status $statusBox $form "✓ ffmpeg.dll replaced" "LimeGreen"
-        Update-Progress $progressBar $form 80
+        Update-Progress $progressBar $form 85
         
         # Step 9: Create Startup Shortcut
         if ($chkShortcut.Checked) {
@@ -401,7 +514,7 @@ $btnStart.Add_Click({
             $WshShell = New-Object -ComObject WScript.Shell
             $Shortcut = $WshShell.CreateShortcut($shortcutPath)
             $Shortcut.TargetPath = $PSCommandPath
-            $Shortcut.WorkingDirectory = $scriptDir
+            $Shortcut.WorkingDirectory = (Split-Path -Parent $PSCommandPath)
             $Shortcut.Save()
             
             Add-Status $statusBox $form "✓ Startup shortcut created" "LimeGreen"
@@ -459,6 +572,10 @@ $btnStart.Add_Click({
             [System.Windows.Forms.MessageBoxIcon]::Error
         )
     } finally {
+        # Clean up temp directory
+        if (Test-Path $tempDir) {
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
         $btnStart.Enabled = $true
     }
 })

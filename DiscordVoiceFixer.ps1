@@ -19,14 +19,14 @@ $Fonts = @{
     Small = New-Object System.Drawing.Font("Segoe UI", 8.5)
 }
 
-$DiscordClients = @{
-    0 = @{ Name = "BetterDiscord         [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
-    1 = @{ Name = "Discord - Canary      [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
-    2 = @{ Name = "Discord - Development [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
-    3 = @{ Name = "Discord - PTB         [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
-    4 = @{ Name = "Discord - Stable      [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
-    5 = @{ Name = "Equicord              [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
-    6 = @{ Name = "Vencord               [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
+$DiscordClients = [ordered]@{
+    0 = @{ Name = "BetterDiscord            [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    1 = @{ Name = "Discord - Canary         [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
+    2 = @{ Name = "Discord - Development    [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
+    3 = @{ Name = "Discord - PTB            [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
+    4 = @{ Name = "Discord - Stable         [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    5 = @{ Name = "Equicord                 [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
+    6 = @{ Name = "Vencord                  [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
 }
 
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscordVoiceFixer.ps1"
@@ -262,7 +262,7 @@ $clientCombo.DropDownStyle = "DropDownList"
 $clientCombo.BackColor = $Theme.ControlBg
 $clientCombo.ForeColor = $Theme.TextPrimary
 $clientCombo.FlatStyle = "Flat"
-$clientCombo.Font = $Fonts.Normal
+$clientCombo.Font = New-Object System.Drawing.Font("Consolas", 9)
 foreach ($client in $DiscordClients.Values) {
     [void]$clientCombo.Items.Add($client.Name)
 }

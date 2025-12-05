@@ -20,13 +20,13 @@ $Fonts = @{
 }
 
 $DiscordClients = @{
-    0 = @{ Name = "Discord (Stable)"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
-    1 = @{ Name = "Discord PTB"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
-    2 = @{ Name = "Discord Canary"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
-    3 = @{ Name = "Discord Development"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
-    4 = @{ Name = "Vencord"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
-    5 = @{ Name = "BetterDiscord"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
-    6 = @{ Name = "Equicord"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
+    0 = @{ Name = "BetterDiscord         [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    1 = @{ Name = "Discord - Canary      [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
+    2 = @{ Name = "Discord - Development [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
+    3 = @{ Name = "Discord - PTB         [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
+    4 = @{ Name = "Discord - Stable      [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    5 = @{ Name = "Equicord              [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
+    6 = @{ Name = "Vencord               [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
 }
 
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscordVoiceFixer.ps1"
@@ -266,7 +266,7 @@ $clientCombo.Font = $Fonts.Normal
 foreach ($client in $DiscordClients.Values) {
     [void]$clientCombo.Items.Add($client.Name)
 }
-$clientCombo.SelectedIndex = 0
+$clientCombo.SelectedIndex = 4
 $clientGroup.Controls.Add($clientCombo)
 
 $optionsGroup = New-Object System.Windows.Forms.GroupBox

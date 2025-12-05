@@ -353,8 +353,10 @@ $btnStart.Add_Click({
                 
                 Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
                 
-                $updateContent = Get-Content $updateFile -Raw
-                $currentContent = Get-Content $currentScript -Raw
+                $updateContent = (Get-Content $updateFile -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
+                $currentContent = (Get-Content $currentScript -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
+                $updateContent = $updateContent.Trim()
+                $currentContent = $currentContent.Trim()
                 
                 if ($updateContent -ne $currentContent) {
                     Add-Status $statusBox $form "New update found!" "Yellow"

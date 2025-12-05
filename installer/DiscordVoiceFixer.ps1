@@ -20,11 +20,11 @@ $Fonts = @{
 }
 
 $DiscordClients = [ordered]@{
-    0 = @{ Name = "Discord - Canary         [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
-    1 = @{ Name = "Discord - Development    [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
-    2 = @{ Name = "Discord - PTB            [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
-    3 = @{ Name = "Discord - Stable         [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
-    4 = @{ Name = "BetterDiscord            [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    0 = @{ Name = "BetterDiscord            [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
+    1 = @{ Name = "Discord - Canary         [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe" }
+    2 = @{ Name = "Discord - Development    [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe" }
+    3 = @{ Name = "Discord - PTB            [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe" }
+    4 = @{ Name = "Discord - Stable         [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
     5 = @{ Name = "Equicord                 [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
     6 = @{ Name = "Vencord                  [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
 }
@@ -348,36 +348,42 @@ $btnStart.Add_Click({
             Update-Progress $progressBar $form 5
             
             try {
-                $updateFile = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
                 $currentScript = $PSCommandPath
                 
-                Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
-                
-                $updateContent = (Get-Content $updateFile -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
-                $currentContent = (Get-Content $currentScript -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
-                $updateContent = $updateContent.Trim()
-                $currentContent = $currentContent.Trim()
-                
-                if ($updateContent -ne $currentContent) {
-                    Add-Status $statusBox $form "New update found!" "Yellow"
-                    
-                    if ($chkAutoUpdate.Checked) {
-                        Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
-                        Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
-                        
-                        Start-Sleep -Seconds 3
-                        
-                        Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
-                        
-                        $form.Close()
-                        return
-                    } else {
-                        Add-Status $statusBox $form "Update downloaded to: $updateFile" "Orange"
-                        Add-Status $statusBox $form "Please manually replace the script file to update." "Orange"
-                    }
+                # Skip update check if running via iex (no file path)
+                if ([string]::IsNullOrEmpty($currentScript)) {
+                    Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen"
                 } else {
-                    Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"
-                    Remove-Item $updateFile -ErrorAction SilentlyContinue
+                    $updateFile = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
+                    
+                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
+                    
+                    $updateContent = (Get-Content $updateFile -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
+                    $currentContent = (Get-Content $currentScript -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
+                    $updateContent = $updateContent.Trim()
+                    $currentContent = $currentContent.Trim()
+                    
+                    if ($updateContent -ne $currentContent) {
+                        Add-Status $statusBox $form "New update found!" "Yellow"
+                        
+                        if ($chkAutoUpdate.Checked) {
+                            Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
+                            Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
+                            
+                            Start-Sleep -Seconds 3
+                            
+                            Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
+                            
+                            $form.Close()
+                            return
+                        } else {
+                            Add-Status $statusBox $form "Update downloaded to: $updateFile" "Orange"
+                            Add-Status $statusBox $form "Please manually replace the script file to update." "Orange"
+                        }
+                    } else {
+                        Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"
+                        Remove-Item $updateFile -ErrorAction SilentlyContinue
+                    }
                 }
             } catch {
                 Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange"

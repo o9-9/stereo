@@ -27,7 +27,7 @@ $DiscordClients = @{
     4 = @{ Name = "Vencord"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
 }
 
-$UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscorVoiceFixer.ps1"
+$UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscordVoiceFixer.ps1"
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
 $FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/refs/heads/main/ffmpeg.dll"
 #endregion
@@ -170,7 +170,7 @@ function Download-VoiceBackupFiles {
         return $true
     }
     catch {
-        Add-Status $StatusBox $Form "  ✗ Failed to download voice backup files: $($_.Exception.Message)" "Red"
+        Add-Status $StatusBox $Form "  [X] Failed to download voice backup files: $($_.Exception.Message)" "Red"
         return $false
     }
 }
@@ -189,7 +189,7 @@ function Download-FFmpeg {
         return $true
     }
     catch {
-        Add-Status $StatusBox $Form "  ✗ Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"
+        Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"
         return $false
     }
 }
@@ -207,18 +207,18 @@ function Apply-ScriptUpdate {
 echo Waiting for script to close...
 timeout /t 2 /nobreak >nul
 echo Applying update...
-copy /Y "$UpdatedScriptPath" "$CurrentScriptPath" >nul
+copy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul
 if errorlevel 1 (
     echo Update failed!
     pause
-) else (
-    echo Update applied successfully!
-    echo Starting updated script...
-    timeout /t 1 /nobreak >nul
-    start "" powershell.exe -ExecutionPolicy Bypass -File "$CurrentScriptPath"
+    exit /b 1
 )
-del "$UpdatedScriptPath" >nul 2>&1
-del "%~f0" >nul 2>&1
+echo Update applied successfully!
+echo Starting updated script...
+timeout /t 1 /nobreak >nul
+powershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"
+del `"$UpdatedScriptPath`" >nul 2>&1
+(goto) 2>nul & del `"%~f0`"
 "@
     
     $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
@@ -359,7 +359,7 @@ $btnStart.Add_Click({
                     
                     if ($chkAutoUpdate.Checked) {
                         Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
-                        Add-Status $statusBox $form "✓ Update prepared! Restarting in 3 seconds..." "LimeGreen"
+                        Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
                         
                         Start-Sleep -Seconds 3
                         
@@ -372,11 +372,11 @@ $btnStart.Add_Click({
                         Add-Status $statusBox $form "Please manually replace the script file to update." "Orange"
                     }
                 } else {
-                    Add-Status $statusBox $form "✓ You are on the latest version" "LimeGreen"
+                    Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"
                     Remove-Item $updateFile -ErrorAction SilentlyContinue
                 }
             } catch {
-                Add-Status $statusBox $form "⚠ Could not check for updates: $($_.Exception.Message)" "Orange"
+                Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange"
             }
         }
         
@@ -402,7 +402,7 @@ $btnStart.Add_Click({
             throw "Failed to download ffmpeg.dll from GitHub"
         }
         
-        Add-Status $statusBox $form "✓ All files downloaded successfully" "LimeGreen"
+        Add-Status $statusBox $form "[OK] All files downloaded successfully" "LimeGreen"
         Update-Progress $progressBar $form 30
         
         # Step 3: Kill Discord Processes
@@ -417,7 +417,7 @@ $btnStart.Add_Click({
         
         Start-Sleep -Seconds 1
         Update-Progress $progressBar $form 40
-        Add-Status $statusBox $form "✓ Discord processes closed" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
         
         # Step 4: Locate Installation
         Add-Status $statusBox $form "Locating Discord installation..." "Blue"
@@ -439,7 +439,7 @@ $btnStart.Add_Click({
             throw "No Discord app folder with voice module found in $basePath"
         }
         
-        Add-Status $statusBox $form "✓ Found $($selectedClient.Name) at: $appPath" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Found $($selectedClient.Name) at: $appPath" "LimeGreen"
         Update-Progress $progressBar $form 50
         
         # Step 5: Locate Voice Module
@@ -456,7 +456,7 @@ $btnStart.Add_Click({
             $voiceModule.FullName
         }
         
-        Add-Status $statusBox $form "✓ Voice module located" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"
         Update-Progress $progressBar $form 60
         
         # Step 6: Clear Old Files
@@ -464,20 +464,20 @@ $btnStart.Add_Click({
         if (Test-Path $targetVoiceFolder) {
             Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        Add-Status $statusBox $form "✓ Old files removed" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"
         Update-Progress $progressBar $form 70
         
         # Step 7: Copy Module Files
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
         Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
-        Add-Status $statusBox $form "✓ Module files copied" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"
         Update-Progress $progressBar $form 80
         
         # Step 8: Copy ffmpeg.dll
         Add-Status $statusBox $form "Copying ffmpeg.dll..." "Blue"
         $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
         Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
-        Add-Status $statusBox $form "✓ ffmpeg.dll replaced" "LimeGreen"
+        Add-Status $statusBox $form "[OK] ffmpeg.dll replaced" "LimeGreen"
         Update-Progress $progressBar $form 85
         
         # Step 9: Create Startup Shortcut
@@ -492,7 +492,7 @@ $btnStart.Add_Click({
             $Shortcut.WorkingDirectory = (Split-Path -Parent $PSCommandPath)
             $Shortcut.Save()
             
-            Add-Status $statusBox $form "✓ Startup shortcut created" "LimeGreen"
+            Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen"
         }
         Update-Progress $progressBar $form 90
         
@@ -509,15 +509,15 @@ $btnStart.Add_Click({
                     $altExe = Join-Path $fallbackApp $selectedClient.Exe
                     $started = Start-DiscordClient -ExePath $altExe
                     if ($started) {
-                        Add-Status $statusBox $form "✓ Discord started (from alternate location)" "LimeGreen"
+                        Add-Status $statusBox $form "[OK] Discord started (from alternate location)" "LimeGreen"
                     }
                 }
             } elseif ($started) {
-                Add-Status $statusBox $form "✓ Discord started" "LimeGreen"
+                Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
             }
             
             if (-not $started) {
-                Add-Status $statusBox $form "⚠ Could not find Discord executable" "Orange"
+                Add-Status $statusBox $form "[!] Could not find Discord executable" "Orange"
             }
         }
         
@@ -537,7 +537,7 @@ $btnStart.Add_Click({
         
     } catch {
         Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "✗ ERROR: $($_.Exception.Message)" "Red"
+        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
         
         [System.Windows.Forms.MessageBox]::Show(
             $form,

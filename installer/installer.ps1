@@ -146,16 +146,13 @@ function Download-VoiceBackupFiles {
     )
     
     try {
-        # Create destination directory if it doesn't exist
         if (-not (Test-Path $DestinationPath)) {
             New-Item -Path $DestinationPath -ItemType Directory -Force | Out-Null
         }
         
-        # Get list of files from GitHub API
         Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
         $response = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30
         
-        # Download each file
         $fileCount = 0
         foreach ($file in $response) {
             if ($file.type -eq "file") {
@@ -203,7 +200,6 @@ function Apply-ScriptUpdate {
         [string]$CurrentScriptPath
     )
     
-    # Create a batch file that will replace the script after it closes
     $batchFile = Join-Path $env:TEMP "StereoInstaller_Update.bat"
     
     $batchContent = @"
@@ -226,14 +222,11 @@ del "%~f0" >nul 2>&1
 "@
     
     $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
-    
-    # Start the batch file detached
     Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$batchFile`"" -WindowStyle Hidden
 }
 #endregion
 
 #region UI Creation
-# Main Form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Stereo Installer"
 $form.Size = New-Object System.Drawing.Size(520, 550)
@@ -243,17 +236,14 @@ $form.MaximizeBox = $false
 $form.BackColor = $Theme.Background
 $form.TopMost = $true
 
-# Title
 $titleLabel = New-StyledLabel -X 20 -Y 15 -Width 460 -Height 35 -Text "Stereo Installer" -Font $Fonts.Title -TextAlign "MiddleCenter"
 $form.Controls.Add($titleLabel)
 
-# Credits
 $creditsLabel = New-StyledLabel -X 20 -Y 52 -Width 460 -Height 28 `
     -Text "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend" `
     -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
 $form.Controls.Add($creditsLabel)
 
-# Discord Client GroupBox
 $clientGroup = New-Object System.Windows.Forms.GroupBox
 $clientGroup.Location = New-Object System.Drawing.Point(20, 90)
 $clientGroup.Size = New-Object System.Drawing.Size(460, 60)
@@ -277,7 +267,6 @@ foreach ($client in $DiscordClients.Values) {
 $clientCombo.SelectedIndex = 0
 $clientGroup.Controls.Add($clientCombo)
 
-# Options GroupBox
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
 $optionsGroup.Location = New-Object System.Drawing.Point(20, 160)
 $optionsGroup.Size = New-Object System.Drawing.Size(460, 135)
@@ -303,7 +292,6 @@ $chkAutoStart = New-StyledCheckBox -X 20 -Y 100 -Width 420 -Height 22 `
     -Text "Automatically start Discord after fixing" -Checked $true
 $optionsGroup.Controls.Add($chkAutoStart)
 
-# Status Box
 $statusBox = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Location = New-Object System.Drawing.Point(20, 305)
 $statusBox.Size = New-Object System.Drawing.Size(460, 110)
@@ -315,14 +303,12 @@ $statusBox.DetectUrls = $false
 $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
-# Progress Bar
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Location = New-Object System.Drawing.Point(20, 425)
 $progressBar.Size = New-Object System.Drawing.Size(460, 22)
 $progressBar.Style = "Continuous"
 $form.Controls.Add($progressBar)
 
-# Start Button
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Location = New-Object System.Drawing.Point(190, 455)
 $btnStart.Size = New-Object System.Drawing.Size(120, 38)
@@ -349,7 +335,6 @@ $btnStart.Add_Click({
     $statusBox.Clear()
     $progressBar.Value = 0
     
-    # Create temp directory for downloads
     $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
     
     try {
@@ -366,7 +351,6 @@ $btnStart.Add_Click({
                 
                 Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
                 
-                # Compare file contents
                 $updateContent = Get-Content $updateFile -Raw
                 $currentContent = Get-Content $currentScript -Raw
                 
@@ -377,13 +361,10 @@ $btnStart.Add_Click({
                         Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
                         Add-Status $statusBox $form "✓ Update prepared! Restarting in 3 seconds..." "LimeGreen"
                         
-                        # Give user time to read the message
                         Start-Sleep -Seconds 3
                         
-                        # Apply update using batch file method
                         Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
                         
-                        # Close immediately - no MessageBox to wait for user
                         $form.Close()
                         return
                     } else {
@@ -405,7 +386,6 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
         
-        # Download voice backup files
         $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
         $voiceDownloadSuccess = Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $statusBox -Form $form
         
@@ -415,7 +395,6 @@ $btnStart.Add_Click({
         
         Update-Progress $progressBar $form 20
         
-        # Download ffmpeg.dll
         $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
         $ffmpegDownloadSuccess = Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $statusBox -Form $form
         
@@ -568,7 +547,6 @@ $btnStart.Add_Click({
             [System.Windows.Forms.MessageBoxIcon]::Error
         )
     } finally {
-        # Clean up temp directory
         if (Test-Path $tempDir) {
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -577,6 +555,5 @@ $btnStart.Add_Click({
 })
 #endregion
 
-# Show Form
 $form.Add_Shown({$form.Activate()})
 [void]$form.ShowDialog()

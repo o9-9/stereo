@@ -375,19 +375,15 @@ $btnStart.Add_Click({
                     
                     if ($chkAutoUpdate.Checked) {
                         Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
+                        Add-Status $statusBox $form "✓ Update prepared! Restarting in 3 seconds..." "LimeGreen"
+                        
+                        # Give user time to read the message
+                        Start-Sleep -Seconds 3
                         
                         # Apply update using batch file method
                         Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
                         
-                        Add-Status $statusBox $form "✓ Update prepared! Script will restart automatically." "LimeGreen"
-                        
-                        $result = [System.Windows.Forms.MessageBox]::Show(
-                            $form,
-                            "Script update downloaded! The script will close and automatically restart with the new version.",
-                            "Update Ready",
-                            [System.Windows.Forms.MessageBoxButtons]::OK,
-                            [System.Windows.Forms.MessageBoxIcon]::Information
-                        )
+                        # Close immediately - no MessageBox to wait for user
                         $form.Close()
                         return
                     } else {

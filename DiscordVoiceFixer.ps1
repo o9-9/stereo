@@ -6,6 +6,8 @@ $Theme = @{
     Background = [System.Drawing.Color]::FromArgb(32, 34, 37)
     ControlBg  = [System.Drawing.Color]::FromArgb(47, 49, 54)
     Primary    = [System.Drawing.Color]::FromArgb(88, 101, 242)
+    Secondary  = [System.Drawing.Color]::FromArgb(70, 73, 80)
+    Warning    = [System.Drawing.Color]::FromArgb(250, 168, 26)
     TextPrimary = [System.Drawing.Color]::White
     TextSecondary = [System.Drawing.Color]::FromArgb(150, 150, 150)
     TextDim = [System.Drawing.Color]::FromArgb(180, 180, 180)
@@ -15,6 +17,7 @@ $Fonts = @{
     Title = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
     Normal = New-Object System.Drawing.Font("Segoe UI", 9)
     Button = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    ButtonSmall = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     Console = New-Object System.Drawing.Font("Consolas", 9)
     Small = New-Object System.Drawing.Font("Segoe UI", 8.5)
 }
@@ -32,6 +35,9 @@ $DiscordClients = [ordered]@{
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscordVoiceFixer.ps1"
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
 $FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/refs/heads/main/ffmpeg.dll"
+
+$BACKUP_ROOT = "$env:APPDATA\StereoInstaller\backups"
+$STATE_FILE = "$env:APPDATA\StereoInstaller\state.json"
 #endregion
 
 #region Helper Functions
@@ -71,6 +77,26 @@ function New-StyledCheckBox {
     return $checkbox
 }
 
+function New-StyledButton {
+    param(
+        [int]$X, [int]$Y, [int]$Width, [int]$Height,
+        [string]$Text,
+        [System.Drawing.Font]$Font = $Fonts.Button,
+        [System.Drawing.Color]$BackColor = $Theme.Primary
+    )
+    $button = New-Object System.Windows.Forms.Button
+    $button.Location = New-Object System.Drawing.Point($X, $Y)
+    $button.Size = New-Object System.Drawing.Size($Width, $Height)
+    $button.Text = $Text
+    $button.Font = $Font
+    $button.BackColor = $BackColor
+    $button.ForeColor = $Theme.TextPrimary
+    $button.FlatStyle = "Flat"
+    $button.FlatAppearance.BorderSize = 0
+    $button.Cursor = [System.Windows.Forms.Cursors]::Hand
+    return $button
+}
+
 function Add-Status {
     param(
         [System.Windows.Forms.RichTextBox]$StatusBox,
@@ -100,16 +126,13 @@ function Update-Progress {
 function Stop-DiscordProcesses {
     param([string[]]$ProcessNames)
     
-    $killedAny = $false
-    foreach ($procName in $ProcessNames) {
-        $processes = Get-Process -Name $procName -ErrorAction SilentlyContinue
-        if ($processes) {
-            $processes | Stop-Process -Force -ErrorAction SilentlyContinue
-            $killedAny = $true
-            Start-Sleep -Milliseconds 100
-        }
+    $processes = Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue
+    if ($processes) {
+        $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 300
+        return $true
     }
-    return $killedAny
+    return $false
 }
 
 function Find-DiscordAppPath {
@@ -126,6 +149,15 @@ function Find-DiscordAppPath {
                 return $folder.FullName
             }
         }
+    }
+    return $null
+}
+
+function Get-DiscordAppVersion {
+    param([string]$AppPath)
+    
+    if ($AppPath -match "app-(\d+\.\d+\.\d+)") {
+        return $matches[1]
     }
     return $null
 }
@@ -226,12 +258,231 @@ del `"$UpdatedScriptPath`" >nul 2>&1
     $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
     Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$batchFile`"" -WindowStyle Hidden
 }
+
+#region Backup Functions
+function Initialize-BackupDirectory {
+    if (-not (Test-Path $BACKUP_ROOT)) {
+        New-Item -Path $BACKUP_ROOT -ItemType Directory -Force | Out-Null
+    }
+    $stateDir = Split-Path $STATE_FILE -Parent
+    if (-not (Test-Path $stateDir)) {
+        New-Item -Path $stateDir -ItemType Directory -Force | Out-Null
+    }
+}
+
+function Get-StateData {
+    if (Test-Path $STATE_FILE) {
+        try {
+            return Get-Content $STATE_FILE -Raw | ConvertFrom-Json
+        } catch {
+            return $null
+        }
+    }
+    return $null
+}
+
+function Save-StateData {
+    param([hashtable]$State)
+    $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force
+}
+
+function Create-VoiceBackup {
+    param(
+        [string]$VoiceFolderPath,
+        [string]$FfmpegPath,
+        [string]$ClientName,
+        [string]$AppVersion,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form
+    )
+    
+    try {
+        Initialize-BackupDirectory
+        
+        $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+        $safeClientName = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
+        $backupName = "${safeClientName}_${AppVersion}_${timestamp}"
+        $backupPath = Join-Path $BACKUP_ROOT $backupName
+        
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        
+        # Backup voice module
+        $voiceBackupPath = Join-Path $backupPath "voice_module"
+        Add-Status $StatusBox $Form "  Backing up voice module..." "Cyan"
+        Copy-Item -Path $VoiceFolderPath -Destination $voiceBackupPath -Recurse -Force
+        
+        # Backup ffmpeg.dll if it exists
+        if (Test-Path $FfmpegPath) {
+            Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"
+            Copy-Item -Path $FfmpegPath -Destination (Join-Path $backupPath "ffmpeg.dll") -Force
+        }
+        
+        # Save metadata
+        $metadata = @{
+            ClientName = $ClientName
+            AppVersion = $AppVersion
+            BackupDate = (Get-Date).ToString("o")
+            VoiceModulePath = $VoiceFolderPath
+            FfmpegPath = $FfmpegPath
+        }
+        $metadata | ConvertTo-Json | Out-File (Join-Path $backupPath "metadata.json") -Force
+        
+        Add-Status $StatusBox $Form "[OK] Backup created: $backupName" "LimeGreen"
+        return $backupPath
+    }
+    catch {
+        Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"
+        return $null
+    }
+}
+
+function Get-AvailableBackups {
+    Initialize-BackupDirectory
+    
+    $backups = @()
+    $backupFolders = Get-ChildItem -Path $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    
+    foreach ($folder in $backupFolders) {
+        $metadataPath = Join-Path $folder.FullName "metadata.json"
+        if (Test-Path $metadataPath) {
+            try {
+                $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+                $backups += @{
+                    Path = $folder.FullName
+                    Name = $folder.Name
+                    ClientName = $metadata.ClientName
+                    AppVersion = $metadata.AppVersion
+                    BackupDate = [DateTime]::Parse($metadata.BackupDate)
+                    DisplayName = "$($metadata.ClientName) v$($metadata.AppVersion) - $(([DateTime]::Parse($metadata.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+    
+    return $backups
+}
+
+function Restore-FromBackup {
+    param(
+        [hashtable]$Backup,
+        [string]$TargetVoicePath,
+        [string]$TargetFfmpegPath,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form
+    )
+    
+    try {
+        $voiceBackupPath = Join-Path $Backup.Path "voice_module"
+        $ffmpegBackupPath = Join-Path $Backup.Path "ffmpeg.dll"
+        
+        # Restore voice module
+        if (Test-Path $voiceBackupPath) {
+            Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
+            if (Test-Path $TargetVoicePath) {
+                Remove-Item "$TargetVoicePath\*" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Copy-Item -Path "$voiceBackupPath\*" -Destination $TargetVoicePath -Recurse -Force
+        }
+        
+        # Restore ffmpeg.dll
+        if (Test-Path $ffmpegBackupPath) {
+            Add-Status $StatusBox $Form "  Restoring ffmpeg.dll..." "Cyan"
+            Copy-Item -Path $ffmpegBackupPath -Destination $TargetFfmpegPath -Force
+        }
+        
+        return $true
+    }
+    catch {
+        Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"
+        return $false
+    }
+}
+
+function Remove-OldBackups {
+    param([int]$KeepCount = 5)
+    
+    $backups = Get-AvailableBackups | Sort-Object { $_.BackupDate } -Descending
+    
+    if ($backups.Count -gt $KeepCount) {
+        $toRemove = $backups | Select-Object -Skip $KeepCount
+        foreach ($backup in $toRemove) {
+            Remove-Item $backup.Path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+#endregion
+
+#region Discord Update Detection
+function Check-DiscordUpdated {
+    param(
+        [string]$ClientPath,
+        [string]$ClientName
+    )
+    
+    $state = Get-StateData
+    if (-not $state) { return $null }
+    
+    $clientKey = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
+    
+    $appPath = Find-DiscordAppPath -BasePath $ClientPath
+    if (-not $appPath) { return $null }
+    
+    $currentVersion = Get-DiscordAppVersion -AppPath $appPath
+    if (-not $currentVersion) { return $null }
+    
+    $lastVersion = $state.$clientKey.LastFixedVersion
+    $lastFixDate = $state.$clientKey.LastFixDate
+    
+    if ($lastVersion -and $currentVersion -ne $lastVersion) {
+        return @{
+            Updated = $true
+            OldVersion = $lastVersion
+            NewVersion = $currentVersion
+            LastFixDate = $lastFixDate
+        }
+    }
+    
+    return @{
+        Updated = $false
+        CurrentVersion = $currentVersion
+        LastFixDate = $lastFixDate
+    }
+}
+
+function Save-FixState {
+    param(
+        [string]$ClientName,
+        [string]$Version
+    )
+    
+    Initialize-BackupDirectory
+    
+    $state = Get-StateData
+    if (-not $state) { $state = @{} }
+    if ($state -is [PSCustomObject]) {
+        $newState = @{}
+        $state.PSObject.Properties | ForEach-Object { $newState[$_.Name] = $_.Value }
+        $state = $newState
+    }
+    
+    $clientKey = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
+    
+    $state[$clientKey] = @{
+        LastFixedVersion = $Version
+        LastFixDate = (Get-Date).ToString("o")
+    }
+    
+    Save-StateData -State $state
+}
+#endregion
 #endregion
 
 #region UI Creation
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Stereo Installer"
-$form.Size = New-Object System.Drawing.Size(520, 550)
+$form.Size = New-Object System.Drawing.Size(520, 600)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -246,8 +497,12 @@ $creditsLabel = New-StyledLabel -X 20 -Y 52 -Width 460 -Height 28 `
     -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
 $form.Controls.Add($creditsLabel)
 
+# Update status label (for Discord update detection)
+$updateStatusLabel = New-StyledLabel -X 20 -Y 82 -Width 460 -Height 20 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
+$form.Controls.Add($updateStatusLabel)
+
 $clientGroup = New-Object System.Windows.Forms.GroupBox
-$clientGroup.Location = New-Object System.Drawing.Point(20, 90)
+$clientGroup.Location = New-Object System.Drawing.Point(20, 105)
 $clientGroup.Size = New-Object System.Drawing.Size(460, 60)
 $clientGroup.Text = "Discord Client"
 $clientGroup.ForeColor = $Theme.TextPrimary
@@ -270,7 +525,7 @@ $clientCombo.SelectedIndex = 4
 $clientGroup.Controls.Add($clientCombo)
 
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
-$optionsGroup.Location = New-Object System.Drawing.Point(20, 160)
+$optionsGroup.Location = New-Object System.Drawing.Point(20, 175)
 $optionsGroup.Size = New-Object System.Drawing.Size(460, 135)
 $optionsGroup.Text = "Options"
 $optionsGroup.ForeColor = $Theme.TextPrimary
@@ -295,8 +550,8 @@ $chkAutoStart = New-StyledCheckBox -X 20 -Y 100 -Width 420 -Height 22 `
 $optionsGroup.Controls.Add($chkAutoStart)
 
 $statusBox = New-Object System.Windows.Forms.RichTextBox
-$statusBox.Location = New-Object System.Drawing.Point(20, 305)
-$statusBox.Size = New-Object System.Drawing.Size(460, 110)
+$statusBox.Location = New-Object System.Drawing.Point(20, 320)
+$statusBox.Size = New-Object System.Drawing.Size(460, 120)
 $statusBox.ReadOnly = $true
 $statusBox.BackColor = $Theme.ControlBg
 $statusBox.ForeColor = $Theme.TextPrimary
@@ -306,22 +561,24 @@ $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(20, 425)
+$progressBar.Location = New-Object System.Drawing.Point(20, 450)
 $progressBar.Size = New-Object System.Drawing.Size(460, 22)
 $progressBar.Style = "Continuous"
 $form.Controls.Add($progressBar)
 
-$btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Location = New-Object System.Drawing.Point(190, 455)
-$btnStart.Size = New-Object System.Drawing.Size(120, 38)
-$btnStart.Text = "Start Fix"
-$btnStart.Font = $Fonts.Button
-$btnStart.BackColor = $Theme.Primary
-$btnStart.ForeColor = $Theme.TextPrimary
-$btnStart.FlatStyle = "Flat"
-$btnStart.FlatAppearance.BorderSize = 0
-$btnStart.Cursor = [System.Windows.Forms.Cursors]::Hand
+# Button panel
+$btnStart = New-StyledButton -X 20 -Y 485 -Width 140 -Height 38 -Text "Start Fix"
 $form.Controls.Add($btnStart)
+
+$btnRollback = New-StyledButton -X 180 -Y 485 -Width 140 -Height 38 -Text "Rollback" -BackColor $Theme.Secondary
+$form.Controls.Add($btnRollback)
+
+$btnCheckUpdate = New-StyledButton -X 340 -Y 485 -Width 140 -Height 38 -Text "Check Discord" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
+$form.Controls.Add($btnCheckUpdate)
+
+# Version info label
+$versionInfoLabel = New-StyledLabel -X 20 -Y 530 -Width 460 -Height 20 -Text "" -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
+$form.Controls.Add($versionInfoLabel)
 #endregion
 
 #region Event Handlers
@@ -332,8 +589,191 @@ $chkUpdate.Add_CheckedChanged({
     }
 })
 
+# Check Discord update on client selection change
+$clientCombo.Add_SelectedIndexChanged({
+    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    $basePath = $selectedClient.Path
+    if (-not (Test-Path $basePath) -and $selectedClient.FallbackPath) {
+        $basePath = $selectedClient.FallbackPath
+    }
+    
+    $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
+    
+    if ($updateCheck -and $updateCheck.Updated) {
+        $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
+        $updateStatusLabel.ForeColor = $Theme.Warning
+    } elseif ($updateCheck -and $updateCheck.LastFixDate) {
+        $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
+        $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
+        $updateStatusLabel.ForeColor = $Theme.TextSecondary
+    } else {
+        $updateStatusLabel.Text = ""
+    }
+})
+
+# Check Discord Update button
+$btnCheckUpdate.Add_Click({
+    $statusBox.Clear()
+    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    
+    Add-Status $statusBox $form "Checking Discord version..." "Blue"
+    
+    $basePath = $selectedClient.Path
+    if (-not (Test-Path $basePath) -and $selectedClient.FallbackPath) {
+        $basePath = $selectedClient.FallbackPath
+    }
+    
+    if (-not (Test-Path $basePath)) {
+        Add-Status $statusBox $form "[X] Discord client not found at: $basePath" "Red"
+        return
+    }
+    
+    $appPath = Find-DiscordAppPath -BasePath $basePath
+    if (-not $appPath) {
+        Add-Status $statusBox $form "[X] No Discord installation found" "Red"
+        return
+    }
+    
+    $currentVersion = Get-DiscordAppVersion -AppPath $appPath
+    Add-Status $statusBox $form "Current version: $currentVersion" "Cyan"
+    
+    $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
+    
+    if ($updateCheck -and $updateCheck.Updated) {
+        Add-Status $statusBox $form "[!] Discord has been updated!" "Yellow"
+        Add-Status $statusBox $form "    Previous: v$($updateCheck.OldVersion)" "Orange"
+        Add-Status $statusBox $form "    Current:  v$($updateCheck.NewVersion)" "Orange"
+        Add-Status $statusBox $form "    Re-applying the fix is recommended." "Yellow"
+        $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
+        $updateStatusLabel.ForeColor = $Theme.Warning
+    } elseif ($updateCheck -and $updateCheck.LastFixDate) {
+        $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
+        Add-Status $statusBox $form "[OK] No update detected since last fix" "LimeGreen"
+        Add-Status $statusBox $form "    Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
+        $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
+        $updateStatusLabel.ForeColor = $Theme.TextSecondary
+    } else {
+        Add-Status $statusBox $form "[!] No previous fix recorded for this client" "Yellow"
+        Add-Status $statusBox $form "    Run 'Start Fix' to apply the fix." "Cyan"
+        $updateStatusLabel.Text = ""
+    }
+})
+
+# Rollback button
+$btnRollback.Add_Click({
+    $statusBox.Clear()
+    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    
+    Add-Status $statusBox $form "Loading available backups..." "Blue"
+    
+    $backups = Get-AvailableBackups
+    
+    if ($backups.Count -eq 0) {
+        Add-Status $statusBox $form "[X] No backups found" "Red"
+        [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "No backups available. Run 'Start Fix' first to create a backup.",
+            "No Backups",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+        return
+    }
+    
+    # Create backup selection dialog
+    $rollbackForm = New-Object System.Windows.Forms.Form
+    $rollbackForm.Text = "Select Backup to Restore"
+    $rollbackForm.Size = New-Object System.Drawing.Size(450, 300)
+    $rollbackForm.StartPosition = "CenterParent"
+    $rollbackForm.FormBorderStyle = "FixedDialog"
+    $rollbackForm.MaximizeBox = $false
+    $rollbackForm.MinimizeBox = $false
+    $rollbackForm.BackColor = $Theme.Background
+    $rollbackForm.TopMost = $true
+    
+    $listBox = New-Object System.Windows.Forms.ListBox
+    $listBox.Location = New-Object System.Drawing.Point(20, 20)
+    $listBox.Size = New-Object System.Drawing.Size(395, 180)
+    $listBox.BackColor = $Theme.ControlBg
+    $listBox.ForeColor = $Theme.TextPrimary
+    $listBox.Font = $Fonts.Normal
+    
+    foreach ($backup in $backups) {
+        [void]$listBox.Items.Add($backup.DisplayName)
+    }
+    $listBox.SelectedIndex = 0
+    $rollbackForm.Controls.Add($listBox)
+    
+    $btnRestore = New-StyledButton -X 120 -Y 210 -Width 100 -Height 35 -Text "Restore"
+    $btnCancel = New-StyledButton -X 230 -Y 210 -Width 100 -Height 35 -Text "Cancel" -BackColor $Theme.Secondary
+    
+    $rollbackForm.Controls.Add($btnRestore)
+    $rollbackForm.Controls.Add($btnCancel)
+    
+    $btnCancel.Add_Click({ $rollbackForm.DialogResult = "Cancel"; $rollbackForm.Close() })
+    $btnRestore.Add_Click({ $rollbackForm.DialogResult = "OK"; $rollbackForm.Close() })
+    
+    $result = $rollbackForm.ShowDialog($form)
+    
+    if ($result -eq "OK" -and $listBox.SelectedIndex -ge 0) {
+        $selectedBackup = $backups[$listBox.SelectedIndex]
+        
+        Add-Status $statusBox $form "Starting rollback..." "Blue"
+        Add-Status $statusBox $form "  Selected: $($selectedBackup.DisplayName)" "Cyan"
+        
+        # Kill Discord
+        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
+        Stop-DiscordProcesses -ProcessNames $selectedClient.Processes
+        Start-Sleep -Seconds 1
+        
+        # Find paths
+        $basePath = $selectedClient.Path
+        if (-not (Test-Path $basePath) -and $selectedClient.FallbackPath) {
+            $basePath = $selectedClient.FallbackPath
+        }
+        
+        $appPath = Find-DiscordAppPath -BasePath $basePath
+        if (-not $appPath) {
+            Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"
+            return
+        }
+        
+        $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
+            "$($voiceModule.FullName)\discord_voice"
+        } else {
+            $voiceModule.FullName
+        }
+        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
+        
+        # Restore
+        $success = Restore-FromBackup -Backup $selectedBackup -TargetVoicePath $targetVoiceFolder -TargetFfmpegPath $ffmpegTarget -StatusBox $statusBox -Form $form
+        
+        if ($success) {
+            Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen"
+            
+            if ($chkAutoStart.Checked) {
+                Add-Status $statusBox $form "Starting Discord..." "Blue"
+                $discordExe = Join-Path $appPath $selectedClient.Exe
+                Start-DiscordClient -ExePath $discordExe
+                Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
+            }
+            
+            [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "Rollback completed successfully!",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        }
+    }
+})
+
 $btnStart.Add_Click({
     $btnStart.Enabled = $false
+    $btnRollback.Enabled = $false
+    $btnCheckUpdate.Enabled = $false
     $statusBox.Clear()
     $progressBar.Value = 0
     
@@ -350,7 +790,6 @@ $btnStart.Add_Click({
             try {
                 $currentScript = $PSCommandPath
                 
-                # Skip update check if running via iex (no file path)
                 if ([string]::IsNullOrEmpty($currentScript)) {
                     Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen"
                 } else {
@@ -449,7 +888,8 @@ $btnStart.Add_Click({
             throw "No Discord app folder with voice module found in $basePath"
         }
         
-        Add-Status $statusBox $form "[OK] Found $($selectedClient.Name) at: $appPath" "LimeGreen"
+        $appVersion = Get-DiscordAppVersion -AppPath $appPath
+        Add-Status $statusBox $form "[OK] Found $($selectedClient.Name) v$appVersion" "LimeGreen"
         Update-Progress $progressBar $form 50
         
         # Step 5: Locate Voice Module
@@ -466,10 +906,22 @@ $btnStart.Add_Click({
             $voiceModule.FullName
         }
         
+        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
+        
         Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"
+        Update-Progress $progressBar $form 55
+        
+        # Step 6: Create Backup
+        Add-Status $statusBox $form "Creating backup of current files..." "Blue"
+        $backupResult = Create-VoiceBackup -VoiceFolderPath $targetVoiceFolder -FfmpegPath $ffmpegTarget `
+            -ClientName $selectedClient.Name -AppVersion $appVersion -StatusBox $statusBox -Form $form
+        
+        # Cleanup old backups (keep last 5)
+        Remove-OldBackups -KeepCount 5
+        
         Update-Progress $progressBar $form 60
         
-        # Step 6: Clear Old Files
+        # Step 7: Clear Old Files
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
         if (Test-Path $targetVoiceFolder) {
             Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
@@ -477,20 +929,22 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"
         Update-Progress $progressBar $form 70
         
-        # Step 7: Copy Module Files
+        # Step 8: Copy Module Files
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
         Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
         Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"
         Update-Progress $progressBar $form 80
         
-        # Step 8: Copy ffmpeg.dll
+        # Step 9: Copy ffmpeg.dll
         Add-Status $statusBox $form "Copying ffmpeg.dll..." "Blue"
-        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
         Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
         Add-Status $statusBox $form "[OK] ffmpeg.dll replaced" "LimeGreen"
         Update-Progress $progressBar $form 85
         
-        # Step 9: Create Startup Shortcut
+        # Step 10: Save state for update detection
+        Save-FixState -ClientName $selectedClient.Name -Version $appVersion
+        
+        # Step 11: Create Startup Shortcut
         if ($chkShortcut.Checked) {
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
             $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
@@ -506,7 +960,7 @@ $btnStart.Add_Click({
         }
         Update-Progress $progressBar $form 90
         
-        # Step 10: Start Discord
+        # Step 12: Start Discord
         if ($chkAutoStart.Checked) {
             Add-Status $statusBox $form "Starting Discord..." "Blue"
             
@@ -532,12 +986,17 @@ $btnStart.Add_Click({
         }
         
         Update-Progress $progressBar $form 100
+        
+        # Update the version label
+        $updateStatusLabel.Text = "Last fixed: $(Get-Date -Format 'MMM dd, yyyy HH:mm') (v$appVersion)"
+        $updateStatusLabel.ForeColor = $Theme.TextSecondary
+        
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
         
         [System.Windows.Forms.MessageBox]::Show(
             $form,
-            "Discord voice module fix completed successfully!",
+            "Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.",
             "Success",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
@@ -561,9 +1020,33 @@ $btnStart.Add_Click({
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         $btnStart.Enabled = $true
+        $btnRollback.Enabled = $true
+        $btnCheckUpdate.Enabled = $true
     }
 })
 #endregion
 
-$form.Add_Shown({$form.Activate()})
+# Initial update check on form load
+$form.Add_Shown({
+    $form.Activate()
+    
+    # Trigger initial Discord update check
+    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    $basePath = $selectedClient.Path
+    if (-not (Test-Path $basePath) -and $selectedClient.FallbackPath) {
+        $basePath = $selectedClient.FallbackPath
+    }
+    
+    $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
+    
+    if ($updateCheck -and $updateCheck.Updated) {
+        $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
+        $updateStatusLabel.ForeColor = $Theme.Warning
+    } elseif ($updateCheck -and $updateCheck.LastFixDate) {
+        $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
+        $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
+        $updateStatusLabel.ForeColor = $Theme.TextSecondary
+    }
+})
+
 [void]$form.ShowDialog()

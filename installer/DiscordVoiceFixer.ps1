@@ -548,15 +548,15 @@ $creditsLabel = New-StyledLabel -X 20 -Y 52 -Width 460 -Height 28 `
 $form.Controls.Add($creditsLabel)
 
 # Update status label (for Discord update detection)
-$updateStatusLabel = New-StyledLabel -X 20 -Y 82 -Width 460 -Height 20 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
+$updateStatusLabel = New-StyledLabel -X 20 -Y 82 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
 $form.Controls.Add($updateStatusLabel)
 
 # Discord running warning label
-$discordRunningLabel = New-StyledLabel -X 20 -Y 100 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor ([System.Drawing.Color]::FromArgb(250, 168, 26)) -TextAlign "MiddleCenter"
+$discordRunningLabel = New-StyledLabel -X 20 -Y 98 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor ([System.Drawing.Color]::FromArgb(250, 168, 26)) -TextAlign "MiddleCenter"
 $form.Controls.Add($discordRunningLabel)
 
 $clientGroup = New-Object System.Windows.Forms.GroupBox
-$clientGroup.Location = New-Object System.Drawing.Point(20, 105)
+$clientGroup.Location = New-Object System.Drawing.Point(20, 118)
 $clientGroup.Size = New-Object System.Drawing.Size(460, 60)
 $clientGroup.Text = "Discord Client"
 $clientGroup.ForeColor = $Theme.TextPrimary
@@ -579,7 +579,7 @@ $clientCombo.SelectedIndex = 4
 $clientGroup.Controls.Add($clientCombo)
 
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
-$optionsGroup.Location = New-Object System.Drawing.Point(20, 175)
+$optionsGroup.Location = New-Object System.Drawing.Point(20, 188)
 $optionsGroup.Size = New-Object System.Drawing.Size(460, 135)
 $optionsGroup.Text = "Options"
 $optionsGroup.ForeColor = $Theme.TextPrimary
@@ -604,7 +604,7 @@ $chkAutoStart = New-StyledCheckBox -X 20 -Y 100 -Width 420 -Height 22 `
 $optionsGroup.Controls.Add($chkAutoStart)
 
 $statusBox = New-Object System.Windows.Forms.RichTextBox
-$statusBox.Location = New-Object System.Drawing.Point(20, 320)
+$statusBox.Location = New-Object System.Drawing.Point(20, 333)
 $statusBox.Size = New-Object System.Drawing.Size(460, 120)
 $statusBox.ReadOnly = $true
 $statusBox.BackColor = $Theme.ControlBg
@@ -615,30 +615,26 @@ $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(20, 450)
+$progressBar.Location = New-Object System.Drawing.Point(20, 463)
 $progressBar.Size = New-Object System.Drawing.Size(460, 22)
 $progressBar.Style = "Continuous"
 $form.Controls.Add($progressBar)
 
 # Button panel - Row 1
-$btnStart = New-StyledButton -X 20 -Y 485 -Width 100 -Height 38 -Text "Start Fix"
+$btnStart = New-StyledButton -X 20 -Y 498 -Width 100 -Height 38 -Text "Start Fix"
 $form.Controls.Add($btnStart)
 
-$btnFixAll = New-StyledButton -X 125 -Y 485 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.ButtonSmall -BackColor ([System.Drawing.Color]::FromArgb(87, 158, 87))
+$btnFixAll = New-StyledButton -X 125 -Y 498 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.ButtonSmall -BackColor ([System.Drawing.Color]::FromArgb(87, 158, 87))
 $form.Controls.Add($btnFixAll)
 
-$btnRollback = New-StyledButton -X 230 -Y 485 -Width 70 -Height 38 -Text "Rollback" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
+$btnRollback = New-StyledButton -X 230 -Y 498 -Width 70 -Height 38 -Text "Rollback" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
 $form.Controls.Add($btnRollback)
 
-$btnOpenBackups = New-StyledButton -X 305 -Y 485 -Width 70 -Height 38 -Text "Backups" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
+$btnOpenBackups = New-StyledButton -X 305 -Y 498 -Width 70 -Height 38 -Text "Backups" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
 $form.Controls.Add($btnOpenBackups)
 
-$btnCheckUpdate = New-StyledButton -X 380 -Y 485 -Width 100 -Height 38 -Text "Check" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
+$btnCheckUpdate = New-StyledButton -X 380 -Y 498 -Width 100 -Height 38 -Text "Check" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
 $form.Controls.Add($btnCheckUpdate)
-
-# Version info label
-$versionInfoLabel = New-StyledLabel -X 20 -Y 530 -Width 460 -Height 20 -Text "" -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
-$form.Controls.Add($versionInfoLabel)
 #endregion
 
 #region Event Handlers

@@ -624,7 +624,7 @@ $form.Controls.Add($progressBar)
 $btnStart = New-StyledButton -X 20 -Y 498 -Width 100 -Height 38 -Text "Start Fix"
 $form.Controls.Add($btnStart)
 
-$btnFixAll = New-StyledButton -X 125 -Y 498 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.ButtonSmall -BackColor ([System.Drawing.Color]::FromArgb(87, 158, 87))
+$btnFixAll = New-StyledButton -X 125 -Y 498 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.Button -BackColor ([System.Drawing.Color]::FromArgb(87, 158, 87))
 $form.Controls.Add($btnFixAll)
 
 $btnRollback = New-StyledButton -X 230 -Y 498 -Width 70 -Height 38 -Text "Rollback" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary

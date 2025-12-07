@@ -307,6 +307,15 @@ function Create-VoiceBackup {
     )
     
     try {
+        # FIXED: Validate input paths
+        if ([string]::IsNullOrWhiteSpace($VoiceFolderPath)) {
+            throw "Voice folder path is empty or null"
+        }
+        
+        if (-not (Test-Path $VoiceFolderPath)) {
+            throw "Voice folder path does not exist: $VoiceFolderPath"
+        }
+        
         Initialize-BackupDirectory
         
         $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
@@ -322,7 +331,7 @@ function Create-VoiceBackup {
         Copy-Item -Path $VoiceFolderPath -Destination $voiceBackupPath -Recurse -Force
         
         # Backup ffmpeg.dll if it exists
-        if (Test-Path $FfmpegPath) {
+        if (-not [string]::IsNullOrWhiteSpace($FfmpegPath) -and (Test-Path $FfmpegPath)) {
             Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"
             Copy-Item -Path $FfmpegPath -Destination (Join-Path $backupPath "ffmpeg.dll") -Force
         }
@@ -826,11 +835,22 @@ $btnRollback.Add_Click({
             return
         }
         
-        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
-            "$($voiceModule.FullName)\discord_voice"
-        } else {
-            $voiceModule.FullName
+        # FIXED: Better path validation
+        $targetVoiceFolder = $null
+        if ($voiceModule -and $voiceModule.FullName) {
+            $innerPath = Join-Path $voiceModule.FullName "discord_voice"
+            if (Test-Path $innerPath) {
+                $targetVoiceFolder = $innerPath
+            } else {
+                $targetVoiceFolder = $voiceModule.FullName
+            }
         }
+        
+        if ([string]::IsNullOrWhiteSpace($targetVoiceFolder)) {
+            Add-Status $statusBox $form "[X] Could not determine voice module path" "Red"
+            return
+        }
+        
         $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
         
         # Restore
@@ -990,15 +1010,26 @@ $btnStart.Add_Click({
             throw "No discord_voice module found"
         }
         
-        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
-            "$($voiceModule.FullName)\discord_voice"
-        } else {
-            $voiceModule.FullName
+        # FIXED: Better path construction with validation
+        $targetVoiceFolder = $null
+        if ($voiceModule -and $voiceModule.FullName) {
+            $innerPath = Join-Path $voiceModule.FullName "discord_voice"
+            if (Test-Path $innerPath) {
+                $targetVoiceFolder = $innerPath
+                Add-Status $statusBox $form "  Found nested voice module at: discord_voice\" "Cyan"
+            } else {
+                $targetVoiceFolder = $voiceModule.FullName
+                Add-Status $statusBox $form "  Using direct voice module path" "Cyan"
+            }
+        }
+        
+        if ([string]::IsNullOrWhiteSpace($targetVoiceFolder)) {
+            throw "Could not determine valid voice module path"
         }
         
         $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
         
-        Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"
+        Add-Status $statusBox $form "[OK] Voice module located: $targetVoiceFolder" "LimeGreen"
         Update-Progress $progressBar $form 55
         
         # Step 6: Create Backup
@@ -1232,10 +1263,19 @@ $btnFixAll.Add_Click({
                     throw "No discord_voice module found"
                 }
                 
-                $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
-                    "$($voiceModule.FullName)\discord_voice"
-                } else {
-                    $voiceModule.FullName
+                # FIXED: Better path construction with validation
+                $targetVoiceFolder = $null
+                if ($voiceModule -and $voiceModule.FullName) {
+                    $innerPath = Join-Path $voiceModule.FullName "discord_voice"
+                    if (Test-Path $innerPath) {
+                        $targetVoiceFolder = $innerPath
+                    } else {
+                        $targetVoiceFolder = $voiceModule.FullName
+                    }
+                }
+                
+                if ([string]::IsNullOrWhiteSpace($targetVoiceFolder)) {
+                    throw "Could not determine valid voice module path"
                 }
                 
                 $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"

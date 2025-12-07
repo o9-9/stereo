@@ -543,7 +543,7 @@ $titleLabel = New-StyledLabel -X 20 -Y 15 -Width 460 -Height 35 -Text "Stereo In
 $form.Controls.Add($titleLabel)
 
 $creditsLabel = New-StyledLabel -X 20 -Y 52 -Width 460 -Height 28 `
-    -Text "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend" `
+    -Text "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend | Sentry" `
     -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
 $form.Controls.Add($creditsLabel)
 

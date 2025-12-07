@@ -113,6 +113,16 @@ function Add-Status {
     $Form.Refresh()
 }
 
+function Play-CompletionSound {
+    param([bool]$Success = $true)
+    
+    if ($Success) {
+        [System.Media.SystemSounds]::Exclamation.Play()
+    } else {
+        [System.Media.SystemSounds]::Hand.Play()
+    }
+}
+
 function Update-Progress {
     param(
         [System.Windows.Forms.ProgressBar]$ProgressBar,
@@ -339,7 +349,7 @@ function Create-VoiceBackup {
 function Get-AvailableBackups {
     Initialize-BackupDirectory
     
-    $backups = @()
+    $backups = [System.Collections.ArrayList]@()
     $backupFolders = Get-ChildItem -Path $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
     
     foreach ($folder in $backupFolders) {
@@ -347,14 +357,14 @@ function Get-AvailableBackups {
         if (Test-Path $metadataPath) {
             try {
                 $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-                $backups += @{
+                [void]$backups.Add(@{
                     Path = $folder.FullName
                     Name = $folder.Name
                     ClientName = $metadata.ClientName
                     AppVersion = $metadata.AppVersion
                     BackupDate = [DateTime]::Parse($metadata.BackupDate)
                     DisplayName = "$($metadata.ClientName) v$($metadata.AppVersion) - $(([DateTime]::Parse($metadata.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
-                }
+                })
             } catch {
                 continue
             }
@@ -411,6 +421,46 @@ function Remove-OldBackups {
             Remove-Item $backup.Path -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+}
+
+function Get-InstalledClients {
+    $installed = [System.Collections.ArrayList]@()
+    
+    foreach ($key in $DiscordClients.Keys) {
+        $client = $DiscordClients[$key]
+        $basePath = $client.Path
+        
+        # Check primary path
+        if (Test-Path $basePath) {
+            $appPath = Find-DiscordAppPath -BasePath $basePath
+            if ($appPath) {
+                [void]$installed.Add(@{
+                    Index = $key
+                    Name = $client.Name
+                    Path = $basePath
+                    AppPath = $appPath
+                    Client = $client
+                })
+                continue
+            }
+        }
+        
+        # Check fallback path
+        if ($client.FallbackPath -and (Test-Path $client.FallbackPath)) {
+            $appPath = Find-DiscordAppPath -BasePath $client.FallbackPath
+            if ($appPath) {
+                [void]$installed.Add(@{
+                    Index = $key
+                    Name = $client.Name
+                    Path = $client.FallbackPath
+                    AppPath = $appPath
+                    Client = $client
+                })
+            }
+        }
+    }
+    
+    return $installed
 }
 #endregion
 
@@ -501,6 +551,10 @@ $form.Controls.Add($creditsLabel)
 $updateStatusLabel = New-StyledLabel -X 20 -Y 82 -Width 460 -Height 20 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
 $form.Controls.Add($updateStatusLabel)
 
+# Discord running warning label
+$discordRunningLabel = New-StyledLabel -X 20 -Y 100 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor ([System.Drawing.Color]::FromArgb(250, 168, 26)) -TextAlign "MiddleCenter"
+$form.Controls.Add($discordRunningLabel)
+
 $clientGroup = New-Object System.Windows.Forms.GroupBox
 $clientGroup.Location = New-Object System.Drawing.Point(20, 105)
 $clientGroup.Size = New-Object System.Drawing.Size(460, 60)
@@ -566,14 +620,20 @@ $progressBar.Size = New-Object System.Drawing.Size(460, 22)
 $progressBar.Style = "Continuous"
 $form.Controls.Add($progressBar)
 
-# Button panel
-$btnStart = New-StyledButton -X 20 -Y 485 -Width 140 -Height 38 -Text "Start Fix"
+# Button panel - Row 1
+$btnStart = New-StyledButton -X 20 -Y 485 -Width 100 -Height 38 -Text "Start Fix"
 $form.Controls.Add($btnStart)
 
-$btnRollback = New-StyledButton -X 180 -Y 485 -Width 140 -Height 38 -Text "Rollback" -BackColor $Theme.Secondary
+$btnFixAll = New-StyledButton -X 125 -Y 485 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.ButtonSmall -BackColor ([System.Drawing.Color]::FromArgb(87, 158, 87))
+$form.Controls.Add($btnFixAll)
+
+$btnRollback = New-StyledButton -X 230 -Y 485 -Width 70 -Height 38 -Text "Rollback" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
 $form.Controls.Add($btnRollback)
 
-$btnCheckUpdate = New-StyledButton -X 340 -Y 485 -Width 140 -Height 38 -Text "Check Discord" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
+$btnOpenBackups = New-StyledButton -X 305 -Y 485 -Width 70 -Height 38 -Text "Backups" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
+$form.Controls.Add($btnOpenBackups)
+
+$btnCheckUpdate = New-StyledButton -X 380 -Y 485 -Width 100 -Height 38 -Text "Check" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
 $form.Controls.Add($btnCheckUpdate)
 
 # Version info label
@@ -588,6 +648,26 @@ $chkUpdate.Add_CheckedChanged({
         $chkAutoUpdate.Checked = $false
     }
 })
+
+# Open backups folder button
+$btnOpenBackups.Add_Click({
+    Initialize-BackupDirectory
+    Start-Process "explorer.exe" -ArgumentList $BACKUP_ROOT
+})
+
+# Function to check if Discord is running and update warning
+function Update-DiscordRunningWarning {
+    $discordProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment")
+    $running = Get-Process -Name $discordProcesses -ErrorAction SilentlyContinue
+    
+    if ($running) {
+        $discordRunningLabel.Text = "⚠ Discord is running — it will be closed when you apply the fix"
+        $discordRunningLabel.Visible = $true
+    } else {
+        $discordRunningLabel.Text = ""
+        $discordRunningLabel.Visible = $false
+    }
+}
 
 # Check Discord update on client selection change
 $clientCombo.Add_SelectedIndexChanged({
@@ -718,6 +798,11 @@ $btnRollback.Add_Click({
     if ($result -eq "OK" -and $listBox.SelectedIndex -ge 0) {
         $selectedBackup = $backups[$listBox.SelectedIndex]
         
+        if (-not $selectedBackup -or -not $selectedBackup.Path) {
+            Add-Status $statusBox $form "[X] Invalid backup selection" "Red"
+            return
+        }
+        
         Add-Status $statusBox $form "Starting rollback..." "Blue"
         Add-Status $statusBox $form "  Selected: $($selectedBackup.DisplayName)" "Cyan"
         
@@ -739,6 +824,12 @@ $btnRollback.Add_Click({
         }
         
         $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        
+        if (-not $voiceModule) {
+            Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"
+            return
+        }
+        
         $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
             "$($voiceModule.FullName)\discord_voice"
         } else {
@@ -759,6 +850,8 @@ $btnRollback.Add_Click({
                 Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
             }
             
+            Play-CompletionSound -Success $true
+            
             [System.Windows.Forms.MessageBox]::Show(
                 $form,
                 "Rollback completed successfully!",
@@ -772,6 +865,7 @@ $btnRollback.Add_Click({
 
 $btnStart.Add_Click({
     $btnStart.Enabled = $false
+    $btnFixAll.Enabled = $false
     $btnRollback.Enabled = $false
     $btnCheckUpdate.Enabled = $false
     $statusBox.Clear()
@@ -994,6 +1088,8 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
         
+        Play-CompletionSound -Success $true
+        
         [System.Windows.Forms.MessageBox]::Show(
             $form,
             "Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.",
@@ -1008,6 +1104,8 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
         
+        Play-CompletionSound -Success $false
+        
         [System.Windows.Forms.MessageBox]::Show(
             $form,
             "An error occurred: $($_.Exception.Message)",
@@ -1020,6 +1118,226 @@ $btnStart.Add_Click({
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         $btnStart.Enabled = $true
+        $btnFixAll.Enabled = $true
+        $btnRollback.Enabled = $true
+        $btnCheckUpdate.Enabled = $true
+    }
+})
+
+# Fix All Clients button
+$btnFixAll.Add_Click({
+    $btnStart.Enabled = $false
+    $btnFixAll.Enabled = $false
+    $btnRollback.Enabled = $false
+    $btnCheckUpdate.Enabled = $false
+    $statusBox.Clear()
+    $progressBar.Value = 0
+    
+    $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    
+    try {
+        # Step 1: Detect installed clients
+        Add-Status $statusBox $form "Scanning for installed Discord clients..." "Blue"
+        $installedClients = Get-InstalledClients
+        
+        if ($installedClients.Count -eq 0) {
+            Add-Status $statusBox $form "[X] No Discord clients found!" "Red"
+            [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "No Discord clients were found on this system.",
+                "No Clients Found",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            )
+            return
+        }
+        
+        # Remove duplicates (mods pointing to same Discord folder)
+        $uniquePaths = @{}
+        $uniqueClients = [System.Collections.ArrayList]@()
+        foreach ($client in $installedClients) {
+            if (-not $uniquePaths.ContainsKey($client.AppPath)) {
+                $uniquePaths[$client.AppPath] = $true
+                [void]$uniqueClients.Add($client)
+            }
+        }
+        
+        Add-Status $statusBox $form "[OK] Found $($uniqueClients.Count) client(s):" "LimeGreen"
+        foreach ($client in $uniqueClients) {
+            $version = Get-DiscordAppVersion -AppPath $client.AppPath
+            Add-Status $statusBox $form "    - $($client.Name.Trim()) (v$version)" "Cyan"
+        }
+        
+        Update-Progress $progressBar $form 5
+        
+        # Confirm with user
+        $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "Found $($uniqueClients.Count) Discord client(s). Apply fix to all?",
+            "Confirm Fix All",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        
+        if ($confirmResult -ne "Yes") {
+            Add-Status $statusBox $form "Operation cancelled by user" "Yellow"
+            return
+        }
+        
+        # Step 2: Download files (once)
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+        
+        $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
+        $voiceDownloadSuccess = Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $statusBox -Form $form
+        
+        if (-not $voiceDownloadSuccess) {
+            throw "Failed to download voice backup files from GitHub"
+        }
+        
+        $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
+        $ffmpegDownloadSuccess = Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $statusBox -Form $form
+        
+        if (-not $ffmpegDownloadSuccess) {
+            throw "Failed to download ffmpeg.dll from GitHub"
+        }
+        
+        Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"
+        Update-Progress $progressBar $form 20
+        
+        # Step 3: Kill ALL Discord processes
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
+        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "Equicord", "Vencord", "Update")
+        Stop-DiscordProcesses -ProcessNames $allProcesses
+        Start-Sleep -Seconds 1
+        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+        Update-Progress $progressBar $form 30
+        
+        # Step 4: Fix each client
+        $progressPerClient = 60 / $uniqueClients.Count
+        $currentProgress = 30
+        $fixedCount = 0
+        $failedClients = @()
+        
+        foreach ($clientInfo in $uniqueClients) {
+            Add-Status $statusBox $form "" "White"
+            Add-Status $statusBox $form "=== Fixing: $($clientInfo.Name.Trim()) ===" "Blue"
+            
+            try {
+                $appPath = $clientInfo.AppPath
+                $appVersion = Get-DiscordAppVersion -AppPath $appPath
+                
+                # Locate voice module
+                $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                
+                if (-not $voiceModule) {
+                    throw "No discord_voice module found"
+                }
+                
+                $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
+                    "$($voiceModule.FullName)\discord_voice"
+                } else {
+                    $voiceModule.FullName
+                }
+                
+                $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
+                
+                # Create backup
+                Add-Status $statusBox $form "  Creating backup..." "Cyan"
+                Create-VoiceBackup -VoiceFolderPath $targetVoiceFolder -FfmpegPath $ffmpegTarget `
+                    -ClientName $clientInfo.Name -AppVersion $appVersion -StatusBox $statusBox -Form $form | Out-Null
+                
+                # Clear old files
+                if (Test-Path $targetVoiceFolder) {
+                    Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                
+                # Copy new files
+                Add-Status $statusBox $form "  Copying module files..." "Cyan"
+                Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
+                
+                # Copy ffmpeg
+                Add-Status $statusBox $form "  Copying ffmpeg.dll..." "Cyan"
+                Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
+                
+                # Save state
+                Save-FixState -ClientName $clientInfo.Name -Version $appVersion
+                
+                Add-Status $statusBox $form "[OK] $($clientInfo.Name.Trim()) fixed successfully" "LimeGreen"
+                $fixedCount++
+            }
+            catch {
+                Add-Status $statusBox $form "[X] Failed to fix $($clientInfo.Name.Trim()): $($_.Exception.Message)" "Red"
+                $failedClients += $clientInfo.Name
+            }
+            
+            $currentProgress += $progressPerClient
+            Update-Progress $progressBar $form ([int]$currentProgress)
+        }
+        
+        # Cleanup old backups
+        Remove-OldBackups -KeepCount 10
+        
+        Update-Progress $progressBar $form 95
+        
+        # Step 5: Start Discord (optional - start the first/primary client)
+        if ($chkAutoStart.Checked -and $fixedCount -gt 0) {
+            Add-Status $statusBox $form "" "White"
+            Add-Status $statusBox $form "Starting Discord..." "Blue"
+            $primaryClient = $uniqueClients[0]
+            $discordExe = Join-Path $primaryClient.AppPath $primaryClient.Client.Exe
+            if (Start-DiscordClient -ExePath $discordExe) {
+                Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
+            }
+        }
+        
+        Update-Progress $progressBar $form 100
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "=== FIX ALL COMPLETED ===" "LimeGreen"
+        Add-Status $statusBox $form "Fixed: $fixedCount / $($uniqueClients.Count) clients" "Cyan"
+        
+        if ($failedClients.Count -gt 0) {
+            Play-CompletionSound -Success $false
+            [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "Fixed $fixedCount of $($uniqueClients.Count) clients.`n`nFailed: $($failedClients -join ', ')",
+                "Completed with Errors",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            )
+        } else {
+            Play-CompletionSound -Success $true
+            [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "Successfully fixed all $fixedCount Discord client(s)!",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        }
+    }
+    catch {
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
+        
+        Play-CompletionSound -Success $false
+        
+        [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "An error occurred: $($_.Exception.Message)",
+            "Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        )
+    }
+    finally {
+        if (Test-Path $tempDir) {
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $btnStart.Enabled = $true
+        $btnFixAll.Enabled = $true
         $btnRollback.Enabled = $true
         $btnCheckUpdate.Enabled = $true
     }
@@ -1029,6 +1347,9 @@ $btnStart.Add_Click({
 # Initial update check on form load
 $form.Add_Shown({
     $form.Activate()
+    
+    # Check if Discord is running
+    Update-DiscordRunningWarning
     
     # Trigger initial Discord update check
     $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]

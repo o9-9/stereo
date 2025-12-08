@@ -657,7 +657,7 @@ function Update-DiscordRunningWarning {
     $running = Get-Process -Name $discordProcesses -ErrorAction SilentlyContinue
     
     if ($running) {
-        $discordRunningLabel.Text = "⚠ Discord is running — it will be closed when you apply the fix"
+        $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"
         $discordRunningLabel.Visible = $true
     } else {
         $discordRunningLabel.Text = ""

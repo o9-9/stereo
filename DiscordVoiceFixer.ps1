@@ -52,6 +52,7 @@ $DiscordClients = [ordered]@{
     4 = @{ Name = "Discord - Stable         [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe" }
     5 = @{ Name = "Equicord                 [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe" }
     6 = @{ Name = "Vencord                  [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe" }
+    7 = @{ Name = "BetterVencord            [Mod]"; Path = "$env:LOCALAPPDATA\BetterVencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("BetterVencord", "Discord", "Update"); Exe = "Discord.exe" }
 }
 
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/refs/heads/main/DiscordVoiceFixer.ps1"

@@ -660,7 +660,7 @@ $optionsGroup.Controls.Add($chkAutoUpdate)
 $chkShortcut = New-StyledCheckBox -X 20 -Y 69 -Width 280 -Height 22 -Text "Create startup shortcut" -Checked $settings.CreateShortcut
 $optionsGroup.Controls.Add($chkShortcut)
 
-$btnSaveScript = New-StyledButton -X 305 -Y 69 -Width 135 -Height 24 -Text "Save Script" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
+$btnSaveScript = New-StyledButton -X 305 -Y 69 -Width 135 -Height 22 -Text "Save Script" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
 $optionsGroup.Controls.Add($btnSaveScript)
 
 $chkSilentStartup = New-StyledCheckBox -X 40 -Y 91 -Width 400 -Height 22 -Text "Run silently on startup (no GUI, auto-fix all)" -Checked $settings.SilentStartup -ForeColor $Theme.TextDim

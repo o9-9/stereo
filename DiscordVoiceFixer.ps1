@@ -543,7 +543,7 @@ if ($Silent -or $CheckOnly) {
         $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
         Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $null -Form $null | Out-Null
 
-        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "Equicord", "Vencord", "Update")
+        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "BetterVencord", "Equicord", "Vencord", "Update")
         Stop-DiscordProcesses -ProcessNames $allProcesses
         Start-Sleep -Seconds 1
 
@@ -1116,7 +1116,7 @@ $btnFixAll.Add_Click({
 
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
-        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "Equicord", "Vencord", "Update")
+        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "BetterVencord", "Equicord", "Vencord", "Update")
         Stop-DiscordProcesses -ProcessNames $allProcesses
         Start-Sleep -Seconds 1
         Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"

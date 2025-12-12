@@ -1,1379 +1,745 @@
-param(
-    [switch]$Silent,
-    [switch]$CheckOnly,
-    [string]$FixClient,
-    [switch]$Help
-)
-
-# [FIX] Force TLS 1.2 compatibility for GitHub requests
+param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]"; exit 0 }
 
-if ($Help) {
-    Write-Host @"
-Discord Voice Fixer
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-Usage: .\DiscordVoiceFixer.ps1 [options]
-
-Options:
-  -Silent       Run without GUI, automatically fix all detected clients
-  -CheckOnly    Only check if Discord has updated, don't apply fixes
-  -FixClient    Fix a specific client by name
-  -Help         Show this help message
-"@
-    exit 0
-}
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-# [THEME] Your exact theme preserved
+# Theme & Fonts
 $Theme = @{
-    Background    = [System.Drawing.Color]::FromArgb(32, 34, 37)
-    ControlBg     = [System.Drawing.Color]::FromArgb(47, 49, 54)
-    Primary       = [System.Drawing.Color]::FromArgb(88, 101, 242)
-    Secondary     = [System.Drawing.Color]::FromArgb(70, 73, 80)
-    Warning       = [System.Drawing.Color]::FromArgb(250, 168, 26)
-    Success       = [System.Drawing.Color]::FromArgb(87, 158, 87)
-    TextPrimary   = [System.Drawing.Color]::White
-    TextSecondary = [System.Drawing.Color]::FromArgb(150, 150, 150)
-    TextDim       = [System.Drawing.Color]::FromArgb(180, 180, 180)
+    Background=[System.Drawing.Color]::FromArgb(32,34,37); ControlBg=[System.Drawing.Color]::FromArgb(47,49,54)
+    Primary=[System.Drawing.Color]::FromArgb(88,101,242); Secondary=[System.Drawing.Color]::FromArgb(70,73,80)
+    Warning=[System.Drawing.Color]::FromArgb(250,168,26); Success=[System.Drawing.Color]::FromArgb(87,158,87)
+    TextPrimary=[System.Drawing.Color]::White; TextSecondary=[System.Drawing.Color]::FromArgb(150,150,150)
+    TextDim=[System.Drawing.Color]::FromArgb(180,180,180)
 }
-
 $Fonts = @{
-    Title       = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
-    Normal      = New-Object System.Drawing.Font("Segoe UI", 9)
-    Button      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    ButtonSmall = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-    Console     = New-Object System.Drawing.Font("Consolas", 9)
-    Small       = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    Title=New-Object System.Drawing.Font("Segoe UI",16,[System.Drawing.FontStyle]::Bold)
+    Normal=New-Object System.Drawing.Font("Segoe UI",9)
+    Button=New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
+    ButtonSmall=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold)
+    Console=New-Object System.Drawing.Font("Consolas",9)
+    Small=New-Object System.Drawing.Font("Segoe UI",8.5)
 }
 
-# [LOGIC] Added 'Shortcut' property for safe non-C: drive detection
+# Discord Clients Configuration
 $DiscordClients = [ordered]@{
-    0 = @{ Name = "BetterDiscord            [Mod]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe"; Shortcut = "Discord" }
-    1 = @{ Name = "Discord - Canary         [Official]"; Path = "$env:LOCALAPPDATA\DiscordCanary"; Processes = @("DiscordCanary", "Update"); Exe = "DiscordCanary.exe"; Shortcut = "Discord Canary" }
-    2 = @{ Name = "Discord - Development    [Official]"; Path = "$env:LOCALAPPDATA\DiscordDevelopment"; Processes = @("DiscordDevelopment", "Update"); Exe = "DiscordDevelopment.exe"; Shortcut = "Discord Development" }
-    3 = @{ Name = "Discord - PTB            [Official]"; Path = "$env:LOCALAPPDATA\DiscordPTB"; Processes = @("DiscordPTB", "Update"); Exe = "DiscordPTB.exe"; Shortcut = "Discord PTB" }
-    4 = @{ Name = "Discord - Stable         [Official]"; Path = "$env:LOCALAPPDATA\Discord"; Processes = @("Discord", "Update"); Exe = "Discord.exe"; Shortcut = "Discord" }
-    5 = @{ Name = "Equicord                 [Mod]"; Path = "$env:LOCALAPPDATA\Equicord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Equicord", "Discord", "Update"); Exe = "Discord.exe"; Shortcut = "Equicord" }
-    6 = @{ Name = "Vencord                  [Mod]"; Path = "$env:LOCALAPPDATA\Vencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("Vencord", "Discord", "Update"); Exe = "Discord.exe"; Shortcut = "Vencord" }
-    7 = @{ Name = "BetterVencord            [Mod]"; Path = "$env:LOCALAPPDATA\BetterVencord"; FallbackPath = "$env:LOCALAPPDATA\Discord"; Processes = @("BetterVencord", "Discord", "Update"); Exe = "Discord.exe"; Shortcut = "BetterVencord" }
+    0 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
+    1 = @{Name="Discord - Canary         [Official]"; Path="$env:LOCALAPPDATA\DiscordCanary";      Processes=@("DiscordCanary","Update");      Exe="DiscordCanary.exe";      Shortcut="Discord Canary"}
+    2 = @{Name="Discord - Development    [Official]"; Path="$env:LOCALAPPDATA\DiscordDevelopment"; Processes=@("DiscordDevelopment","Update"); Exe="DiscordDevelopment.exe"; Shortcut="Discord Development"}
+    3 = @{Name="Discord - PTB            [Official]"; Path="$env:LOCALAPPDATA\DiscordPTB";         Processes=@("DiscordPTB","Update");         Exe="DiscordPTB.exe";         Shortcut="Discord PTB"}
+    4 = @{Name="Discord - Stable         [Official]"; Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
+    5 = @{Name="Equicord                 [Mod]";      Path="$env:LOCALAPPDATA\Equicord";           FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Equicord","Discord","Update");      Exe="Discord.exe"; Shortcut="Equicord"}
+    6 = @{Name="Vencord                  [Mod]";      Path="$env:LOCALAPPDATA\Vencord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Vencord","Discord","Update");       Exe="Discord.exe"; Shortcut="Vencord"}
+    7 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
+# URLs & Paths
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
 $FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/main/ffmpeg.dll"
-
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"
 $BACKUP_ROOT = "$APP_DATA_ROOT\backups"
 $STATE_FILE = "$APP_DATA_ROOT\state.json"
 $SETTINGS_FILE = "$APP_DATA_ROOT\settings.json"
 $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
 
-function Get-DefaultSettings {
-    return @{
-        CheckForUpdates     = $true
-        AutoApplyUpdates    = $true
-        CreateShortcut      = $false
-        AutoStartDiscord    = $true
-        SelectedClientIndex = 4
-        MaxBackups          = 5
-        SilentStartup       = $false
-    }
-}
+# Helper: ensure directory exists
+function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
+
+# Settings Management
+function Get-DefaultSettings { @{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=4; SilentStartup=$false} }
 
 function Load-Settings {
-    $defaults = Get-DefaultSettings
+    $d = Get-DefaultSettings
     if (Test-Path $SETTINGS_FILE) {
-        try {
-            $saved = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
-            foreach ($key in $defaults.Keys) {
-                if ($null -eq $saved.$key) {
-                    $saved | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] -Force
-                }
-            }
-            return $saved
+        try { $s = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
+            foreach ($k in $d.Keys) { if ($null -eq $s.$k) { $s | Add-Member -NotePropertyName $k -NotePropertyValue $d[$k] -Force } }
+            return $s
         } catch { }
     }
-    return [PSCustomObject]$defaults
+    return [PSCustomObject]$d
 }
 
-function Save-Settings {
-    param([PSCustomObject]$Settings)
-    try {
-        $settingsDir = Split-Path $SETTINGS_FILE -Parent
-        if (-not (Test-Path $settingsDir)) {
-            New-Item -Path $settingsDir -ItemType Directory -Force | Out-Null
-        }
-        $Settings | ConvertTo-Json -Depth 5 | Out-File $SETTINGS_FILE -Force
-    } catch { }
+function Save-Settings { param([PSCustomObject]$Settings)
+    try { EnsureDir (Split-Path $SETTINGS_FILE -Parent); $Settings | ConvertTo-Json -Depth 5 | Out-File $SETTINGS_FILE -Force } catch { }
 }
 
-# [THEME] Preserved GUI Helper Functions
+# GUI Helper Functions
 function New-StyledLabel {
-    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text,
-          [System.Drawing.Font]$Font = $Fonts.Normal,
-          [System.Drawing.Color]$ForeColor = $Theme.TextPrimary,
-          [string]$TextAlign = "MiddleLeft")
-    $label = New-Object System.Windows.Forms.Label
-    $label.Location = New-Object System.Drawing.Point($X, $Y)
-    $label.Size = New-Object System.Drawing.Size($Width, $Height)
-    $label.Text = $Text
-    $label.Font = $Font
-    $label.TextAlign = $TextAlign
-    $label.ForeColor = $ForeColor
-    $label.BackColor = [System.Drawing.Color]::Transparent
-    return $label
+    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text, [System.Drawing.Font]$Font=$Fonts.Normal,
+          [System.Drawing.Color]$ForeColor=$Theme.TextPrimary, [string]$TextAlign="MiddleLeft")
+    $l = New-Object System.Windows.Forms.Label
+    $l.Location = New-Object System.Drawing.Point($X,$Y); $l.Size = New-Object System.Drawing.Size($Width,$Height)
+    $l.Text = $Text; $l.Font = $Font; $l.TextAlign = $TextAlign; $l.ForeColor = $ForeColor
+    $l.BackColor = [System.Drawing.Color]::Transparent; $l
 }
 
 function New-StyledCheckBox {
-    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text,
-          [bool]$Checked = $false,
-          [System.Drawing.Color]$ForeColor = $Theme.TextPrimary)
-    $checkbox = New-Object System.Windows.Forms.CheckBox
-    $checkbox.Location = New-Object System.Drawing.Point($X, $Y)
-    $checkbox.Size = New-Object System.Drawing.Size($Width, $Height)
-    $checkbox.Text = $Text
-    $checkbox.Checked = $Checked
-    $checkbox.ForeColor = $ForeColor
-    $checkbox.Font = $Fonts.Normal
-    return $checkbox
+    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text, [bool]$Checked=$false, [System.Drawing.Color]$ForeColor=$Theme.TextPrimary)
+    $c = New-Object System.Windows.Forms.CheckBox
+    $c.Location = New-Object System.Drawing.Point($X,$Y); $c.Size = New-Object System.Drawing.Size($Width,$Height)
+    $c.Text = $Text; $c.Checked = $Checked; $c.ForeColor = $ForeColor; $c.Font = $Fonts.Normal; $c
 }
 
 function New-StyledButton {
-    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text,
-          [System.Drawing.Font]$Font = $Fonts.Button,
-          [System.Drawing.Color]$BackColor = $Theme.Primary)
-    $button = New-Object System.Windows.Forms.Button
-    $button.Location = New-Object System.Drawing.Point($X, $Y)
-    $button.Size = New-Object System.Drawing.Size($Width, $Height)
-    $button.Text = $Text
-    $button.Font = $Font
-    $button.BackColor = $BackColor
-    $button.ForeColor = $Theme.TextPrimary
-    $button.FlatStyle = "Flat"
-    $button.FlatAppearance.BorderSize = 0
-    $button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    return $button
+    param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text, [System.Drawing.Font]$Font=$Fonts.Button, [System.Drawing.Color]$BackColor=$Theme.Primary)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Location = New-Object System.Drawing.Point($X,$Y); $b.Size = New-Object System.Drawing.Size($Width,$Height)
+    $b.Text = $Text; $b.Font = $Font; $b.BackColor = $BackColor; $b.ForeColor = $Theme.TextPrimary
+    $b.FlatStyle = "Flat"; $b.FlatAppearance.BorderSize = 0; $b.Cursor = [System.Windows.Forms.Cursors]::Hand; $b
 }
 
 function Add-Status {
-    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form,
-          [string]$Message, [string]$Color = "White")
+    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [string]$Message, [string]$Color="White")
     if ($null -eq $StatusBox) { return }
-    $timestamp = Get-Date -Format "HH:mm:ss"
-    $StatusBox.SelectionStart = $StatusBox.TextLength
-    $StatusBox.SelectionLength = 0
+    $ts = Get-Date -Format "HH:mm:ss"
+    $StatusBox.SelectionStart = $StatusBox.TextLength; $StatusBox.SelectionLength = 0
     $StatusBox.SelectionColor = [System.Drawing.Color]::FromName($Color)
-    $StatusBox.AppendText("[$timestamp] $Message`r`n")
-    $StatusBox.ScrollToCaret()
+    $StatusBox.AppendText("[$ts] $Message`r`n"); $StatusBox.ScrollToCaret()
     if ($null -ne $Form) { $Form.Refresh() }
 }
 
-function Play-CompletionSound {
-    param([bool]$Success = $true)
-    if ($Success) { [System.Media.SystemSounds]::Exclamation.Play() }
-    else { [System.Media.SystemSounds]::Hand.Play() }
+function Play-CompletionSound { param([bool]$Success=$true)
+    if ($Success) { [System.Media.SystemSounds]::Exclamation.Play() } else { [System.Media.SystemSounds]::Hand.Play() }
 }
 
-function Update-Progress {
-    param([System.Windows.Forms.ProgressBar]$ProgressBar, [System.Windows.Forms.Form]$Form, [int]$Value)
-    if ($null -ne $ProgressBar) { $ProgressBar.Value = [Math]::Min($Value, 100) }
+function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar, [System.Windows.Forms.Form]$Form, [int]$Value)
+    if ($null -ne $ProgressBar) { $ProgressBar.Value = [Math]::Min($Value,100) }
     if ($null -ne $Form) { $Form.Refresh() }
 }
 
-# [LOGIC] Improved process stopping
-function Stop-DiscordProcesses {
-    param([string[]]$ProcessNames)
-    $processes = Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue
-    if ($processes) {
-        $processes | Stop-Process -Force -ErrorAction SilentlyContinue
-        # Wait up to 5 seconds for processes to actually release locks
-        $timeout = 0
-        while ((Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue) -and $timeout -lt 10) {
-            Start-Sleep -Milliseconds 500
-            $timeout++
-        }
+# Process Management
+function Stop-DiscordProcesses { param([string[]]$ProcessNames)
+    $p = Get-Process -Name $ProcessNames -EA SilentlyContinue
+    if ($p) {
+        $p | Stop-Process -Force -EA SilentlyContinue; $t = 0
+        while ((Get-Process -Name $ProcessNames -EA SilentlyContinue) -and $t -lt 10) { Start-Sleep -Milliseconds 500; $t++ }
         return $true
     }
     return $false
 }
 
-# [LOGIC] Improved Version Sorting
-function Find-DiscordAppPath {
-    param([string]$BasePath)
-    $appFolders = Get-ChildItem -Path $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue
-    
-    # Sort by actual Version object, then fallback to name
-    $sortedFolders = $appFolders | Sort-Object { 
-        if ($_ -match "app-([\d\.]+)") { 
-            return [Version]$matches[1] 
-        } else { 
-            return $_.Name 
-        } 
-    } -Descending
-
-    foreach ($folder in $sortedFolders) {
-        $modulesPath = Join-Path $folder.FullName "modules"
-        if (Test-Path $modulesPath) {
-            $voiceModules = Get-ChildItem -Path $modulesPath -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue
-            if ($voiceModules) { return $folder.FullName }
-        }
+# Discord Path Detection
+function Find-DiscordAppPath { param([string]$BasePath)
+    $af = gci $BasePath -Filter "app-*" -Directory -EA SilentlyContinue | 
+        Sort-Object { if ($_ -match "app-([\d\.]+)") { [Version]$matches[1] } else { $_.Name } } -Descending
+    foreach ($f in $af) {
+        $mp = Join-Path $f.FullName "modules"
+        if (Test-Path $mp) { $vm = gci $mp -Filter "discord_voice*" -Directory -EA SilentlyContinue; if ($vm) { return $f.FullName } }
     }
     return $null
 }
 
-function Get-DiscordAppVersion {
-    param([string]$AppPath)
-    if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }
-    return "Unknown"
+function Get-DiscordAppVersion { param([string]$AppPath)
+    if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }; return "Unknown"
 }
 
-function Start-DiscordClient {
-    param([string]$ExePath)
-    if (Test-Path $ExePath) {
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start", '""', "`"$ExePath`"" -WindowStyle Hidden
-        return $true
-    }
+function Start-DiscordClient { param([string]$ExePath)
+    if (Test-Path $ExePath) { Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true }
     return $false
 }
 
-function Save-ScriptToAppData {
-    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
+function Get-PathFromProcess { param([string]$ProcessName)
+    $p = Get-Process -Name $ProcessName -EA SilentlyContinue | Select-Object -First 1
+    if ($p) { try { return (Split-Path (Split-Path $p.MainModule.FileName -Parent) -Parent) } catch { } }
+    return $null
+}
+
+function Get-PathFromShortcuts { param([string]$ShortcutName)
+    if (-not $ShortcutName) { return $null }
+    $sm = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
+    if (!(Test-Path $sm)) { return $null }
+    $scs = gci $sm -Filter "$ShortcutName.lnk" -Recurse -EA SilentlyContinue
+    if (-not $scs) { return $null }
+    $ws = New-Object -ComObject WScript.Shell
+    foreach ($lf in $scs) { try { $sc = $ws.CreateShortcut($lf.FullName); if (Test-Path $sc.TargetPath) { return (Split-Path $sc.TargetPath -Parent) } } catch { } }
+    return $null
+}
+
+function Get-RealClientPath { param($ClientObj)
+    $p = $ClientObj.Path
+    if (Test-Path $p) { return $p }
+    if ($ClientObj.FallbackPath -and (Test-Path $ClientObj.FallbackPath)) { return $ClientObj.FallbackPath }
+    foreach ($pr in $ClientObj.Processes) {
+        if ($pr -eq "Update") { continue }
+        $pp = Get-PathFromProcess $pr; if ($pp -and (Test-Path $pp)) { return $pp }
+    }
+    if ($ClientObj.Shortcut) { $sp = Get-PathFromShortcuts $ClientObj.Shortcut; if ($sp -and (Test-Path $sp)) { return $sp } }
+    return $null
+}
+
+function Get-InstalledClients {
+    $inst = [System.Collections.ArrayList]@()
+    foreach ($k in $DiscordClients.Keys) {
+        $c = $DiscordClients[$k]; $fp = $null
+        if (Test-Path $c.Path) { $fp = $c.Path }
+        elseif ($c.FallbackPath -and (Test-Path $c.FallbackPath)) { $fp = $c.FallbackPath }
+        else { foreach ($pn in $c.Processes) { if ($pn -eq "Update") { continue }; $dp = Get-PathFromProcess $pn; if ($dp -and (Test-Path $dp)) { $fp = $dp; break } } }
+        if (-not $fp -and $c.Shortcut) { $sp = Get-PathFromShortcuts $c.Shortcut; if ($sp -and (Test-Path $sp)) { $fp = $sp } }
+        if ($fp) { $ap = Find-DiscordAppPath $fp; if ($ap) { [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c}); continue } }
+    }
+    return $inst
+}
+
+# Script & Shortcut Management
+function Save-ScriptToAppData { param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
-        $scriptDir = Split-Path $SAVED_SCRIPT_PATH -Parent
-        if (-not (Test-Path $scriptDir)) {
-            New-Item -Path $scriptDir -ItemType Directory -Force | Out-Null
-        }
+        EnsureDir (Split-Path $SAVED_SCRIPT_PATH -Parent)
         if (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) {
-            Copy-Item -Path $PSCommandPath -Destination $SAVED_SCRIPT_PATH -Force
-            Add-Status $StatusBox $Form "[OK] Script saved to: $SAVED_SCRIPT_PATH" "LimeGreen"
-            return $SAVED_SCRIPT_PATH
+            Copy-Item $PSCommandPath $SAVED_SCRIPT_PATH -Force
+            Add-Status $StatusBox $Form "[OK] Script saved to: $SAVED_SCRIPT_PATH" "LimeGreen"; return $SAVED_SCRIPT_PATH
         }
         Add-Status $StatusBox $Form "Downloading script from GitHub..." "Cyan"
         Invoke-WebRequest -Uri $UPDATE_URL -OutFile $SAVED_SCRIPT_PATH -UseBasicParsing -TimeoutSec 30
-        Add-Status $StatusBox $Form "[OK] Script downloaded and saved" "LimeGreen"
-        return $SAVED_SCRIPT_PATH
-    }
-    catch {
-        Add-Status $StatusBox $Form "[X] Failed to save script: $($_.Exception.Message)" "Red"
-        return $null
-    }
+        Add-Status $StatusBox $Form "[OK] Script downloaded and saved" "LimeGreen"; return $SAVED_SCRIPT_PATH
+    } catch { Add-Status $StatusBox $Form "[X] Failed to save script: $($_.Exception.Message)" "Red"; return $null }
 }
 
-function Create-StartupShortcut {
-    param([string]$ScriptPath, [bool]$RunSilent = $false)
-    $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
-    $shortcutPath = Join-Path $startupFolder "DiscordVoiceFixer.lnk"
-    $WshShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-    $Shortcut.TargetPath = "powershell.exe"
-    # Ensure quotes are handled correctly for paths with spaces
-    $arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
-    if ($RunSilent) { $arguments += " -Silent" }
-    $Shortcut.Arguments = $arguments
-    $Shortcut.WorkingDirectory = (Split-Path -Parent $ScriptPath)
-    $Shortcut.WindowStyle = 7
-    $Shortcut.Save()
+function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$false)
+    $sf = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+    $sp = Join-Path $sf "DiscordVoiceFixer.lnk"
+    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($sp)
+    $sc.TargetPath = "powershell.exe"
+    $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
+    if ($RunSilent) { $ar += " -Silent" }
+    $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
     return $true
 }
 
 function Remove-StartupShortcut {
-    $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
-    if (Test-Path $shortcutPath) {
-        Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
-    }
+    $sp = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
+    if (Test-Path $sp) { Remove-Item $sp -Force -EA SilentlyContinue }
 }
 
-function Download-VoiceBackupFiles {
-    param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
+function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
+    $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
+    $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
+    $bc | Out-File $bf -Encoding ASCII -Force
+    Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
+}
+
+# Download Functions
+function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
-        if (-not (Test-Path $DestinationPath)) {
-            New-Item -Path $DestinationPath -ItemType Directory -Force | Out-Null
-        }
+        EnsureDir $DestinationPath
         Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
-        $response = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30
-        $fileCount = 0
-        foreach ($file in $response) {
-            if ($file.type -eq "file") {
-                $fileName = $file.name
-                $downloadUrl = $file.download_url
-                $filePath = Join-Path $DestinationPath $fileName
-                Add-Status $StatusBox $Form "  Downloading: $fileName" "Cyan"
-                Invoke-WebRequest -Uri $downloadUrl -OutFile $filePath -UseBasicParsing -TimeoutSec 30
-                $fileCount++
+        $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30; $fc = 0
+        foreach ($f in $r) {
+            if ($f.type -eq "file") {
+                $fp = Join-Path $DestinationPath $f.name
+                Add-Status $StatusBox $Form "  Downloading: $($f.name)" "Cyan"
+                Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30; $fc++
             }
         }
-        Add-Status $StatusBox $Form "  Downloaded $fileCount voice backup files" "Cyan"
-        return $true
-    }
-    catch {
-        Add-Status $StatusBox $Form "  [X] Failed to download voice backup files: $($_.Exception.Message)" "Red"
-        return $false
-    }
+        Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"; return $true
+    } catch { Add-Status $StatusBox $Form "  [X] Failed to download voice backup files: $($_.Exception.Message)" "Red"; return $false }
 }
 
-function Download-FFmpeg {
-    param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
+function Download-FFmpeg { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Add-Status $StatusBox $Form "  Downloading ffmpeg.dll from GitHub..." "Cyan"
         Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30
-        Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"
-        return $true
-    }
-    catch {
-        Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"
-        return $false
-    }
+        Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"; return $true
+    } catch { Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"; return $false }
 }
 
-function Apply-ScriptUpdate {
-    param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
-    $batchFile = Join-Path $env:TEMP "StereoInstaller_Update.bat"
-    $batchContent = @"
-@echo off
-timeout /t 2 /nobreak >nul
-copy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul
-timeout /t 1 /nobreak >nul
-powershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"
-del `"$UpdatedScriptPath`" >nul 2>&1
-(goto) 2>nul & del `"%~f0`"
-"@
-    $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$batchFile`"" -WindowStyle Hidden
-}
+# Backup & State Management
+function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
+function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
+function Save-StateData { param([hashtable]$State); $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force }
 
-function Initialize-BackupDirectory {
-    if (-not (Test-Path $BACKUP_ROOT)) {
-        New-Item -Path $BACKUP_ROOT -ItemType Directory -Force | Out-Null
-    }
-    $stateDir = Split-Path $STATE_FILE -Parent
-    if (-not (Test-Path $stateDir)) {
-        New-Item -Path $stateDir -ItemType Directory -Force | Out-Null
-    }
-}
-
-function Get-StateData {
-    if (Test-Path $STATE_FILE) {
-        try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json }
-        catch { return $null }
-    }
-    return $null
-}
-
-function Save-StateData {
-    param([hashtable]$State)
-    $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force
-}
-
-function Create-VoiceBackup {
+function Create-VoiceBackup { 
     param([string]$VoiceFolderPath, [string]$FfmpegPath, [string]$ClientName, [string]$AppVersion,
           [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Initialize-BackupDirectory
-        $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
-        $safeClientName = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
-        $backupName = "${safeClientName}_${AppVersion}_${timestamp}"
-        $backupPath = Join-Path $BACKUP_ROOT $backupName
-        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
-        $voiceBackupPath = Join-Path $backupPath "voice_module"
+        $ts = Get-Date -Format "yyyy-MM-dd_HHmmss"
+        $scn = $ClientName -replace '\s+','_' -replace '\[|\]',''
+        $bn = "${scn}_${AppVersion}_${ts}"
+        $bp = Join-Path $BACKUP_ROOT $bn; try { [void](New-Item $bp -ItemType Directory -Force) } catch { }
+        $vbp = Join-Path $bp "voice_module"
         Add-Status $StatusBox $Form "  Backing up voice module..." "Cyan"
-        Copy-Item -Path $VoiceFolderPath -Destination $voiceBackupPath -Recurse -Force
-        if (Test-Path $FfmpegPath) {
-            Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"
-            Copy-Item -Path $FfmpegPath -Destination (Join-Path $backupPath "ffmpeg.dll") -Force
-        }
-        $metadata = @{
-            ClientName      = $ClientName
-            AppVersion      = $AppVersion
-            BackupDate      = (Get-Date).ToString("o")
-            VoiceModulePath = $VoiceFolderPath
-            FfmpegPath      = $FfmpegPath
-        }
-        $metadata | ConvertTo-Json | Out-File (Join-Path $backupPath "metadata.json") -Force
-        Add-Status $StatusBox $Form "[OK] Backup created: $backupName" "LimeGreen"
-        return $backupPath
-    }
-    catch {
-        Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"
-        return $null
-    }
+        Copy-Item $VoiceFolderPath $vbp -Recurse -Force
+        if (Test-Path $FfmpegPath) { Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"; Copy-Item $FfmpegPath (Join-Path $bp "ffmpeg.dll") -Force }
+        @{ClientName=$ClientName; AppVersion=$AppVersion; BackupDate=(Get-Date).ToString("o"); VoiceModulePath=$VoiceFolderPath; FfmpegPath=$FfmpegPath} | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
+        Add-Status $StatusBox $Form "[OK] Backup created: $bn" "LimeGreen"; return $bp
+    } catch { Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"; return $null }
 }
 
 function Get-AvailableBackups {
     Initialize-BackupDirectory
-    $backups = [System.Collections.ArrayList]@()
-    $backupFolders = Get-ChildItem -Path $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
-    foreach ($folder in $backupFolders) {
-        $metadataPath = Join-Path $folder.FullName "metadata.json"
-        if (Test-Path $metadataPath) {
+    $bks = [System.Collections.ArrayList]@()
+    $bfs = gci $BACKUP_ROOT -Directory -EA SilentlyContinue | Sort-Object Name -Descending
+    foreach ($f in $bfs) {
+        $mp = Join-Path $f.FullName "metadata.json"
+        if (Test-Path $mp) {
             try {
-                $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-                [void]$backups.Add(@{
-                    Path        = $folder.FullName
-                    Name        = $folder.Name
-                    ClientName  = $metadata.ClientName
-                    AppVersion  = $metadata.AppVersion
-                    BackupDate  = [DateTime]::Parse($metadata.BackupDate)
-                    DisplayName = "$($metadata.ClientName) v$($metadata.AppVersion) - $(([DateTime]::Parse($metadata.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
-                })
+                $m = Get-Content $mp -Raw | ConvertFrom-Json
+                [void]$bks.Add(@{Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion
+                    BackupDate=[DateTime]::Parse($m.BackupDate)
+                    DisplayName="$($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"})
             } catch { continue }
         }
     }
-    return $backups
+    return $bks
 }
 
 function Restore-FromBackup {
     param([hashtable]$Backup, [string]$TargetVoicePath, [string]$TargetFfmpegPath,
           [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
-        $voiceBackupPath = Join-Path $Backup.Path "voice_module"
-        $ffmpegBackupPath = Join-Path $Backup.Path "ffmpeg.dll"
-        if (Test-Path $voiceBackupPath) {
+        $vbp = Join-Path $Backup.Path "voice_module"; $fbp = Join-Path $Backup.Path "ffmpeg.dll"
+        if (Test-Path $vbp) {
             Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
-            if (Test-Path $TargetVoicePath) {
-                Remove-Item "$TargetVoicePath\*" -Recurse -Force -ErrorAction SilentlyContinue
-            } else {
-                # [FIX] Ensure directory exists before copy
-                New-Item -Path $TargetVoicePath -ItemType Directory -Force | Out-Null
-            }
-            Copy-Item -Path "$voiceBackupPath\*" -Destination $TargetVoicePath -Recurse -Force
+            if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $TargetVoicePath }
+            Copy-Item "$vbp\*" $TargetVoicePath -Recurse -Force
         }
-        if (Test-Path $ffmpegBackupPath) {
-            Add-Status $StatusBox $Form "  Restoring ffmpeg.dll..." "Cyan"
-            Copy-Item -Path $ffmpegBackupPath -Destination $TargetFfmpegPath -Force
-        }
+        if (Test-Path $fbp) { Add-Status $StatusBox $Form "  Restoring ffmpeg.dll..." "Cyan"; Copy-Item $fbp $TargetFfmpegPath -Force }
         return $true
-    }
-    catch {
-        Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"
-        return $false
-    }
+    } catch { Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"; return $false }
 }
 
 function Remove-OldBackups {
-    param([int]$KeepCount = 5)
-    $backups = Get-AvailableBackups | Sort-Object { $_.BackupDate } -Descending
-    if ($backups.Count -gt $KeepCount) {
-        $toRemove = $backups | Select-Object -Skip $KeepCount
-        foreach ($backup in $toRemove) {
-            Remove-Item $backup.Path -Recurse -Force -ErrorAction SilentlyContinue
-        }
+    $bks = Get-AvailableBackups
+    $byClient = $bks | Group-Object { $_.ClientName }
+    foreach ($group in $byClient) {
+        $sorted = $group.Group | Sort-Object { $_.BackupDate } -Descending
+        $sorted | Select-Object -Skip 1 | % { Remove-Item $_.Path -Recurse -Force -EA SilentlyContinue }
     }
 }
 
-# [LOGIC] Helper to find path from running process (works on any drive)
-function Get-PathFromProcess {
-    param([string]$ProcessName)
-    $proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($proc) {
-        try {
-            $exePath = $proc.MainModule.FileName
-            # Usually ...\Discord\app-1.0.9001\Discord.exe
-            # We want ...\Discord
-            return (Split-Path (Split-Path $exePath -Parent) -Parent)
-        } catch {}
-    }
-    return $null
+function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
+    $st = Get-StateData; if (-not $st) { return $null }
+    $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
+    $ap = Find-DiscordAppPath $ClientPath; if (-not $ap) { return $null }
+    $cv = Get-DiscordAppVersion $ap
+    $lv = $st.$ck.LastFixedVersion; $lfd = $st.$ck.LastFixDate
+    if ($lv -and $cv -ne $lv) { return @{Updated=$true; OldVersion=$lv; NewVersion=$cv; LastFixDate=$lfd; CurrentVersion=$cv} }
+    return @{Updated=$false; CurrentVersion=$cv; LastFixDate=$lfd}
 }
 
-# [LOGIC] Helper to find path from Start Menu Shortcut (works on any drive, safe for AV)
-function Get-PathFromShortcuts {
-    param([string]$ShortcutName)
-    if (-not $ShortcutName) { return $null }
-    
-    $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
-    if (-not (Test-Path $startMenu)) { return $null }
-    
-    # Search recursively for the shortcut
-    $shortcuts = Get-ChildItem -Path $startMenu -Filter "$ShortcutName.lnk" -Recurse -ErrorAction SilentlyContinue
-    if (-not $shortcuts) { return $null }
-    
-    $wshShell = New-Object -ComObject WScript.Shell
-    foreach ($lnkFile in $shortcuts) {
-        try {
-            $shortcut = $wshShell.CreateShortcut($lnkFile.FullName)
-            $targetPath = $shortcut.TargetPath
-            if (Test-Path $targetPath) {
-                 # Target is usually ...\Discord.exe or Update.exe inside the root folder
-                 # We need the root folder
-                 return (Split-Path $targetPath -Parent)
-            }
-        } catch {}
-    }
-    return $null
+function Save-FixState { param([string]$ClientName, [string]$Version)
+    Initialize-BackupDirectory
+    $st = Get-StateData; if (-not $st) { $st = @{} }
+    if ($st -is [PSCustomObject]) { $ns = @{}; $st.PSObject.Properties | % { $ns[$_.Name] = $_.Value }; $st = $ns }
+    $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
+    $st[$ck] = @{LastFixedVersion=$Version; LastFixDate=(Get-Date).ToString("o")}
+    Save-StateData $st
 }
 
-# [LOGIC] Logic to find installed clients checking Default, Process, then Shortcut
-function Get-InstalledClients {
-    $installed = [System.Collections.ArrayList]@()
-    foreach ($key in $DiscordClients.Keys) {
-        $client = $DiscordClients[$key]
-        $foundPath = $null
-
-        # 1. Check Default Path
-        if (Test-Path $client.Path) {
-            $foundPath = $client.Path
+# === SILENT / CHECK-ONLY MODE ===
+if ($Silent -or $CheckOnly) {
+    $ic = Get-InstalledClients
+    if ($ic.Count -eq 0) { Write-Host "No Discord clients found."; exit 1 }
+    
+    if ($CheckOnly) {
+        Write-Host "Checking Discord versions..."; $nf = $false
+        foreach ($ci in $ic) {
+            $uc = Check-DiscordUpdated $ci.Path $ci.Name
+            if ($uc -and $uc.Updated) { Write-Host "[UPDATE] $($ci.Name.Trim()): v$($uc.OldVersion) -> v$($uc.NewVersion)"; $nf = $true }
+            elseif ($uc -and $uc.LastFixDate) { $lf = [DateTime]::Parse($uc.LastFixDate); Write-Host "[OK] $($ci.Name.Trim()): v$($uc.CurrentVersion) (fixed: $($lf.ToString('MMM dd')))" }
+            else { Write-Host "[NEW] $($ci.Name.Trim()): Never fixed"; $nf = $true }
         }
-        # 2. Check Fallback Path
-        elseif ($client.FallbackPath -and (Test-Path $client.FallbackPath)) {
-            $foundPath = $client.FallbackPath
-        }
-        # 3. Check Running Processes (Dynamic Drive Detection)
-        else {
-            foreach ($procName in $client.Processes) {
-                if ($procName -eq "Update") { continue }
-                $dynamicPath = Get-PathFromProcess -ProcessName $procName
-                if ($dynamicPath -and (Test-Path $dynamicPath)) {
-                    $foundPath = $dynamicPath
-                    break
-                }
-            }
+        if ($nf) { exit 1 }; exit 0
+    }
+    
+    if ($FixClient) { $ic = @($ic | ? { $_.Name -like "*$FixClient*" }); if ($ic.Count -eq 0) { Write-Host "Client '$FixClient' not found."; exit 1 } }
+    
+    $up = @{}; $uc = [System.Collections.ArrayList]@()
+    foreach ($c in $ic) { if (-not $up.ContainsKey($c.AppPath)) { $up[$c.AppPath] = $true; [void]$uc.Add($c) } }
+    
+    Write-Host "Found $($uc.Count) client(s)"
+    $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"; EnsureDir $td
+    
+    try {
+        $vbp = Join-Path $td "VoiceBackup"; Download-VoiceBackupFiles $vbp $null $null | Out-Null
+        $ffp = Join-Path $td "ffmpeg.dll"; Download-FFmpeg $ffp $null $null | Out-Null
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","BetterVencord","Equicord","Vencord","Update")
+        Stop-DiscordProcesses $allProcs; Start-Sleep -Seconds 1
+        $set = Load-Settings; $fxc = 0
+        
+        foreach ($ci in $uc) {
+            $cl = $ci.Client; $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
+            Write-Host "Fixing $($cl.Name.Trim()) v$av..."
+            try {
+                $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                if (-not $vm) { throw "No voice module found" }
+                $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
+                $fft = Join-Path $ap "ffmpeg.dll"
+                Create-VoiceBackup $tvf $fft $cl.Name $av $null $null | Out-Null
+                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+                Copy-Item "$vbp\*" $tvf -Recurse -Force; Copy-Item $ffp $fft -Force
+                Save-FixState $cl.Name $av; Write-Host "  [OK] Fixed successfully"; $fxc++
+            } catch { Write-Host "  [FAIL] $($_.Exception.Message)" }
         }
         
-        # 4. Check Start Menu Shortcuts (Safe fallback, No Registry)
-        if (-not $foundPath -and $client.Shortcut) {
-            $shortcutPath = Get-PathFromShortcuts -ShortcutName $client.Shortcut
-            if ($shortcutPath -and (Test-Path $shortcutPath)) {
-                $foundPath = $shortcutPath
-            }
-        }
-
-        if ($foundPath) {
-            $appPath = Find-DiscordAppPath -BasePath $foundPath
-            if ($appPath) {
-                [void]$installed.Add(@{ Index = $key; Name = $client.Name; Path = $foundPath; AppPath = $appPath; Client = $client })
-                continue
-            }
-        }
-    }
-    return $installed
+        Remove-OldBackups
+        if ($set.AutoStartDiscord -and $fxc -gt 0) { $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." }
+        Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
+    } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue } }
 }
 
-function Check-DiscordUpdated {
-    param([string]$ClientPath, [string]$ClientName)
-    $state = Get-StateData
-    if (-not $state) { return $null }
-    $clientKey = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
-    $appPath = Find-DiscordAppPath -BasePath $ClientPath
-    if (-not $appPath) { return $null }
-    $currentVersion = Get-DiscordAppVersion -AppPath $appPath
-    if (-not $currentVersion) { return $null }
-    $lastVersion = $state.$clientKey.LastFixedVersion
-    $lastFixDate = $state.$clientKey.LastFixDate
-    if ($lastVersion -and $currentVersion -ne $lastVersion) {
-        return @{ Updated = $true; OldVersion = $lastVersion; NewVersion = $currentVersion; LastFixDate = $lastFixDate; CurrentVersion = $currentVersion }
-    }
-    return @{ Updated = $false; CurrentVersion = $currentVersion; LastFixDate = $lastFixDate }
-}
-
-function Save-FixState {
-    param([string]$ClientName, [string]$Version)
-    Initialize-BackupDirectory
-    $state = Get-StateData
-    if (-not $state) { $state = @{} }
-    if ($state -is [PSCustomObject]) {
-        $newState = @{}
-        $state.PSObject.Properties | ForEach-Object { $newState[$_.Name] = $_.Value }
-        $state = $newState
-    }
-    $clientKey = $ClientName -replace '\s+', '_' -replace '\[|\]', ''
-    $state[$clientKey] = @{ LastFixedVersion = $Version; LastFixDate = (Get-Date).ToString("o") }
-    Save-StateData -State $state
-}
-
-if ($Silent -or $CheckOnly) {
-    $installedClients = Get-InstalledClients
-    if ($installedClients.Count -eq 0) {
-        Write-Host "No Discord clients found."
-        exit 1
-    }
-
-    if ($CheckOnly) {
-        Write-Host "Checking Discord versions..."
-        $needsFix = $false
-        foreach ($clientInfo in $installedClients) {
-            $updateCheck = Check-DiscordUpdated -ClientPath $clientInfo.Path -ClientName $clientInfo.Name
-            if ($updateCheck -and $updateCheck.Updated) {
-                Write-Host "[UPDATE] $($clientInfo.Name.Trim()): v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion)"
-                $needsFix = $true
-            } elseif ($updateCheck -and $updateCheck.LastFixDate) {
-                $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
-                Write-Host "[OK] $($clientInfo.Name.Trim()): v$($updateCheck.CurrentVersion) (fixed: $($lastFix.ToString('MMM dd')))"
-            } else {
-                Write-Host "[NEW] $($clientInfo.Name.Trim()): Never fixed"
-                $needsFix = $true
-            }
-        }
-        if ($needsFix) { exit 1 }
-        exit 0
-    }
-
-    if ($FixClient) {
-        $installedClients = @($installedClients | Where-Object { $_.Name -like "*$FixClient*" })
-        if ($installedClients.Count -eq 0) {
-            Write-Host "Client '$FixClient' not found."
-            exit 1
-        }
-    }
-
-    $uniquePaths = @{}
-    $uniqueClients = [System.Collections.ArrayList]@()
-    foreach ($client in $installedClients) {
-        if (-not $uniquePaths.ContainsKey($client.AppPath)) {
-            $uniquePaths[$client.AppPath] = $true
-            [void]$uniqueClients.Add($client)
-        }
-    }
-
-    Write-Host "Found $($uniqueClients.Count) client(s)"
-    $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
-    New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-
-    try {
-        $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
-        Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $null -Form $null | Out-Null
-        $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
-        Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $null -Form $null | Out-Null
-
-        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "BetterVencord", "Equicord", "Vencord", "Update")
-        Stop-DiscordProcesses -ProcessNames $allProcesses
-        Start-Sleep -Seconds 1
-
-        $settings = Load-Settings
-        $fixedCount = 0
-
-        foreach ($clientInfo in $uniqueClients) {
-            $client = $clientInfo.Client
-            $appPath = $clientInfo.AppPath
-            $appVersion = Get-DiscordAppVersion -AppPath $appPath
-            Write-Host "Fixing $($client.Name.Trim()) v$appVersion..."
-
-            try {
-                $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-                if (-not $voiceModule) { throw "No voice module found" }
-
-                $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") {
-                    "$($voiceModule.FullName)\discord_voice"
-                } else { $voiceModule.FullName }
-
-                $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
-                Create-VoiceBackup -VoiceFolderPath $targetVoiceFolder -FfmpegPath $ffmpegTarget -ClientName $client.Name -AppVersion $appVersion -StatusBox $null -Form $null | Out-Null
-
-                if (Test-Path $targetVoiceFolder) {
-                    Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
-                } else {
-                    New-Item -Path $targetVoiceFolder -ItemType Directory -Force | Out-Null
-                }
-
-                Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
-                Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
-                Save-FixState -ClientName $client.Name -Version $appVersion
-
-                Write-Host "  [OK] Fixed successfully"
-                $fixedCount++
-            }
-            catch { Write-Host "  [FAIL] $($_.Exception.Message)" }
-        }
-
-        Remove-OldBackups -KeepCount $settings.MaxBackups
-
-        if ($settings.AutoStartDiscord -and $fixedCount -gt 0) {
-            $primaryClient = $uniqueClients[0]
-            $discordExe = Join-Path $primaryClient.AppPath $primaryClient.Client.Exe
-            Start-DiscordClient -ExePath $discordExe
-            Write-Host "Discord started."
-        }
-
-        Write-Host "Fixed $fixedCount of $($uniqueClients.Count) client(s)"
-        exit 0
-    }
-    finally {
-        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-}
-
+# === GUI MODE ===
 $settings = Load-Settings
 
+# Main Form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Stereo Installer"
-$form.Size = New-Object System.Drawing.Size(520, 650)
-$form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedDialog"
-$form.MaximizeBox = $false
-$form.BackColor = $Theme.Background
-$form.TopMost = $true
+$form.Text = "Stereo Installer"; $form.Size = New-Object System.Drawing.Size(520,650)
+$form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
+$form.BackColor = $Theme.Background; $form.TopMost = $true
 
-$titleLabel = New-StyledLabel -X 20 -Y 15 -Width 460 -Height 35 -Text "Stereo Installer" -Font $Fonts.Title -TextAlign "MiddleCenter"
+# Title & Credits
+$titleLabel = New-StyledLabel 20 15 460 35 "Stereo Installer" $Fonts.Title $Theme.TextPrimary "MiddleCenter"
 $form.Controls.Add($titleLabel)
-
-$creditsLabel = New-StyledLabel -X 20 -Y 52 -Width 460 -Height 28 -Text "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend | Sentry" -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleCenter"
+$creditsLabel = New-StyledLabel 20 52 460 28 "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend | Sentry" $Fonts.Small $Theme.TextSecondary "MiddleCenter"
 $form.Controls.Add($creditsLabel)
 
-$updateStatusLabel = New-StyledLabel -X 20 -Y 82 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
-$form.Controls.Add($updateStatusLabel)
+# Status Labels
+$updateStatusLabel = New-StyledLabel 20 82 460 18 "" $Fonts.Small $Theme.Warning "MiddleCenter"; $form.Controls.Add($updateStatusLabel)
+$discordRunningLabel = New-StyledLabel 20 100 460 18 "" $Fonts.Small $Theme.Warning "MiddleCenter"; $form.Controls.Add($discordRunningLabel)
 
-$discordRunningLabel = New-StyledLabel -X 20 -Y 100 -Width 460 -Height 18 -Text "" -Font $Fonts.Small -ForeColor $Theme.Warning -TextAlign "MiddleCenter"
-$form.Controls.Add($discordRunningLabel)
-
+# Client Selection Group
 $clientGroup = New-Object System.Windows.Forms.GroupBox
-$clientGroup.Location = New-Object System.Drawing.Point(20, 120)
-$clientGroup.Size = New-Object System.Drawing.Size(460, 60)
-$clientGroup.Text = "Discord Client"
-$clientGroup.ForeColor = $Theme.TextPrimary
-$clientGroup.BackColor = [System.Drawing.Color]::Transparent
-$clientGroup.Font = $Fonts.Normal
+$clientGroup.Location = New-Object System.Drawing.Point(20,120); $clientGroup.Size = New-Object System.Drawing.Size(460,60)
+$clientGroup.Text = "Discord Client"; $clientGroup.ForeColor = $Theme.TextPrimary
+$clientGroup.BackColor = [System.Drawing.Color]::Transparent; $clientGroup.Font = $Fonts.Normal
 $form.Controls.Add($clientGroup)
 
 $clientCombo = New-Object System.Windows.Forms.ComboBox
-$clientCombo.Location = New-Object System.Drawing.Point(20, 25)
-$clientCombo.Size = New-Object System.Drawing.Size(420, 28)
-$clientCombo.DropDownStyle = "DropDownList"
-$clientCombo.BackColor = $Theme.ControlBg
-$clientCombo.ForeColor = $Theme.TextPrimary
-$clientCombo.FlatStyle = "Flat"
-$clientCombo.Font = New-Object System.Drawing.Font("Consolas", 9)
-foreach ($client in $DiscordClients.Values) { [void]$clientCombo.Items.Add($client.Name) }
+$clientCombo.Location = New-Object System.Drawing.Point(20,25); $clientCombo.Size = New-Object System.Drawing.Size(420,28)
+$clientCombo.DropDownStyle = "DropDownList"; $clientCombo.BackColor = $Theme.ControlBg; $clientCombo.ForeColor = $Theme.TextPrimary
+$clientCombo.FlatStyle = "Flat"; $clientCombo.Font = New-Object System.Drawing.Font("Consolas",9)
+foreach ($c in $DiscordClients.Values) { [void]$clientCombo.Items.Add($c.Name) }
 $clientCombo.SelectedIndex = [Math]::Min($settings.SelectedClientIndex, $clientCombo.Items.Count - 1)
 $clientGroup.Controls.Add($clientCombo)
 
+# Options Group
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
-$optionsGroup.Location = New-Object System.Drawing.Point(20, 190)
-$optionsGroup.Size = New-Object System.Drawing.Size(460, 160)
-$optionsGroup.Text = "Options"
-$optionsGroup.ForeColor = $Theme.TextPrimary
-$optionsGroup.BackColor = [System.Drawing.Color]::Transparent
-$optionsGroup.Font = $Fonts.Normal
+$optionsGroup.Location = New-Object System.Drawing.Point(20,190); $optionsGroup.Size = New-Object System.Drawing.Size(460,160)
+$optionsGroup.Text = "Options"; $optionsGroup.ForeColor = $Theme.TextPrimary
+$optionsGroup.BackColor = [System.Drawing.Color]::Transparent; $optionsGroup.Font = $Fonts.Normal
 $form.Controls.Add($optionsGroup)
 
-$chkUpdate = New-StyledCheckBox -X 20 -Y 25 -Width 420 -Height 22 -Text "Check for script updates before fixing" -Checked $settings.CheckForUpdates
-$optionsGroup.Controls.Add($chkUpdate)
+$chkUpdate = New-StyledCheckBox 20 25 420 22 "Check for script updates before fixing" $settings.CheckForUpdates; $optionsGroup.Controls.Add($chkUpdate)
+$chkAutoUpdate = New-StyledCheckBox 40 47 400 22 "Automatically download and apply updates" $settings.AutoApplyUpdates $Theme.TextPrimary
+$chkAutoUpdate.Enabled = $chkUpdate.Checked; $chkAutoUpdate.Visible = $chkUpdate.Checked; $optionsGroup.Controls.Add($chkAutoUpdate)
+$chkShortcut = New-StyledCheckBox 20 69 280 22 "Create startup shortcut" $settings.CreateShortcut; $optionsGroup.Controls.Add($chkShortcut)
+$btnSaveScript = New-StyledButton 305 69 135 22 "Save Script" $Fonts.ButtonSmall $Theme.Secondary; $optionsGroup.Controls.Add($btnSaveScript)
+$chkSilentStartup = New-StyledCheckBox 40 91 400 22 "Run silently on startup (no GUI, auto-fix all)" $settings.SilentStartup $Theme.TextPrimary
+$chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; $optionsGroup.Controls.Add($chkSilentStartup)
+$chkAutoStart = New-StyledCheckBox 20 113 420 22 "Automatically start Discord after fixing" $settings.AutoStartDiscord; $optionsGroup.Controls.Add($chkAutoStart)
+$lblScriptStatus = New-StyledLabel 20 137 420 18 "" $Fonts.Small $Theme.TextSecondary "MiddleLeft"; $optionsGroup.Controls.Add($lblScriptStatus)
 
-# [FIX] Set Visibility dependent on parent
-$chkAutoUpdate = New-StyledCheckBox -X 40 -Y 47 -Width 400 -Height 22 -Text "Automatically download and apply updates" -Checked $settings.AutoApplyUpdates -ForeColor $Theme.TextPrimary
-$chkAutoUpdate.Enabled = $chkUpdate.Checked
-$chkAutoUpdate.Visible = $chkUpdate.Checked
-$optionsGroup.Controls.Add($chkAutoUpdate)
-
-$chkShortcut = New-StyledCheckBox -X 20 -Y 69 -Width 280 -Height 22 -Text "Create startup shortcut" -Checked $settings.CreateShortcut
-$optionsGroup.Controls.Add($chkShortcut)
-
-$btnSaveScript = New-StyledButton -X 305 -Y 69 -Width 135 -Height 22 -Text "Save Script" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
-$optionsGroup.Controls.Add($btnSaveScript)
-
-# [FIX] Set Visibility dependent on parent
-$chkSilentStartup = New-StyledCheckBox -X 40 -Y 91 -Width 400 -Height 22 -Text "Run silently on startup (no GUI, auto-fix all)" -Checked $settings.SilentStartup -ForeColor $Theme.TextPrimary
-$chkSilentStartup.Enabled = $chkShortcut.Checked
-$chkSilentStartup.Visible = $chkShortcut.Checked
-$optionsGroup.Controls.Add($chkSilentStartup)
-
-$chkAutoStart = New-StyledCheckBox -X 20 -Y 113 -Width 420 -Height 22 -Text "Automatically start Discord after fixing" -Checked $settings.AutoStartDiscord
-$optionsGroup.Controls.Add($chkAutoStart)
-
-$lblScriptStatus = New-StyledLabel -X 20 -Y 137 -Width 420 -Height 18 -Text "" -Font $Fonts.Small -ForeColor $Theme.TextSecondary -TextAlign "MiddleLeft"
-$optionsGroup.Controls.Add($lblScriptStatus)
-
+# Status Box & Progress
 $statusBox = New-Object System.Windows.Forms.RichTextBox
-$statusBox.Location = New-Object System.Drawing.Point(20, 360)
-$statusBox.Size = New-Object System.Drawing.Size(460, 130)
-$statusBox.ReadOnly = $true
-$statusBox.BackColor = $Theme.ControlBg
-$statusBox.ForeColor = $Theme.TextPrimary
-$statusBox.Font = $Fonts.Console
-$statusBox.DetectUrls = $false
-$statusBox.BorderStyle = "FixedSingle"
+$statusBox.Location = New-Object System.Drawing.Point(20,360); $statusBox.Size = New-Object System.Drawing.Size(460,130)
+$statusBox.ReadOnly = $true; $statusBox.BackColor = $Theme.ControlBg; $statusBox.ForeColor = $Theme.TextPrimary
+$statusBox.Font = $Fonts.Console; $statusBox.DetectUrls = $false; $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(20, 500)
-$progressBar.Size = New-Object System.Drawing.Size(460, 22)
-$progressBar.Style = "Continuous"
-$form.Controls.Add($progressBar)
+$progressBar.Location = New-Object System.Drawing.Point(20,500); $progressBar.Size = New-Object System.Drawing.Size(460,22)
+$progressBar.Style = "Continuous"; $form.Controls.Add($progressBar)
 
-$btnStart = New-StyledButton -X 20 -Y 535 -Width 100 -Height 38 -Text "Start Fix"
-$form.Controls.Add($btnStart)
+# Buttons
+$btnStart = New-StyledButton 20 535 100 38 "Start Fix"; $form.Controls.Add($btnStart)
+$btnFixAll = New-StyledButton 125 535 100 38 "Fix All" $Fonts.Button $Theme.Success; $form.Controls.Add($btnFixAll)
+$btnRollback = New-StyledButton 230 535 70 38 "Rollback" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnRollback)
+$btnOpenBackups = New-StyledButton 305 535 70 38 "Backups" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnOpenBackups)
+$btnCheckUpdate = New-StyledButton 380 535 100 38 "Check" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnCheckUpdate)
 
-$btnFixAll = New-StyledButton -X 125 -Y 535 -Width 100 -Height 38 -Text "Fix All" -Font $Fonts.Button -BackColor $Theme.Success
-$form.Controls.Add($btnFixAll)
-
-$btnRollback = New-StyledButton -X 230 -Y 535 -Width 70 -Height 38 -Text "Rollback" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
-$form.Controls.Add($btnRollback)
-
-$btnOpenBackups = New-StyledButton -X 305 -Y 535 -Width 70 -Height 38 -Text "Backups" -Font $Fonts.ButtonSmall -BackColor $Theme.Secondary
-$form.Controls.Add($btnOpenBackups)
-
-$btnCheckUpdate = New-StyledButton -X 380 -Y 535 -Width 100 -Height 38 -Text "Check" -Font $Fonts.ButtonSmall -BackColor $Theme.Warning
-$form.Controls.Add($btnCheckUpdate)
-
+# Helper Functions for GUI
 function Update-ScriptStatusLabel {
     if (Test-Path $SAVED_SCRIPT_PATH) {
-        $lastModified = (Get-Item $SAVED_SCRIPT_PATH).LastWriteTime.ToString("MMM dd, HH:mm")
-        $lblScriptStatus.Text = "Script saved: $lastModified"
-        $lblScriptStatus.ForeColor = $Theme.TextSecondary
+        $lm = (Get-Item $SAVED_SCRIPT_PATH).LastWriteTime.ToString("MMM dd, HH:mm")
+        $lblScriptStatus.Text = "Script saved: $lm"; $lblScriptStatus.ForeColor = $Theme.TextSecondary
     } else {
-        $lblScriptStatus.Text = "Script not saved locally (required for startup shortcut)"
-        $lblScriptStatus.ForeColor = $Theme.Warning
+        $lblScriptStatus.Text = "Script not saved locally (required for startup shortcut)"; $lblScriptStatus.ForeColor = $Theme.Warning
     }
 }
 
 function Update-DiscordRunningWarning {
-    $discordProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment")
-    $running = Get-Process -Name $discordProcesses -ErrorAction SilentlyContinue
-    if ($running) {
-        $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"
-        $discordRunningLabel.Visible = $true
-    } else {
-        $discordRunningLabel.Text = ""
-        $discordRunningLabel.Visible = $false
-    }
+    $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment")
+    $r = Get-Process -Name $dp -EA SilentlyContinue
+    if ($r) { $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"; $discordRunningLabel.Visible = $true }
+    else { $discordRunningLabel.Text = ""; $discordRunningLabel.Visible = $false }
 }
 
 function Save-CurrentSettings {
-    $currentSettings = [PSCustomObject]@{
-        CheckForUpdates     = $chkUpdate.Checked
-        AutoApplyUpdates    = $chkAutoUpdate.Checked
-        CreateShortcut      = $chkShortcut.Checked
-        AutoStartDiscord    = $chkAutoStart.Checked
-        SilentStartup       = $chkSilentStartup.Checked
-        SelectedClientIndex = $clientCombo.SelectedIndex
-        MaxBackups          = 5
-    }
-    Save-Settings -Settings $currentSettings
+    $cs = [PSCustomObject]@{CheckForUpdates=$chkUpdate.Checked; AutoApplyUpdates=$chkAutoUpdate.Checked; CreateShortcut=$chkShortcut.Checked
+        AutoStartDiscord=$chkAutoStart.Checked; SilentStartup=$chkSilentStartup.Checked; SelectedClientIndex=$clientCombo.SelectedIndex}
+    Save-Settings $cs
 }
 
-$chkUpdate.Add_CheckedChanged({
-    $chkAutoUpdate.Enabled = $chkUpdate.Checked
-    # [FIX] Hide completely if not checked
-    $chkAutoUpdate.Visible = $chkUpdate.Checked
-    if (-not $chkUpdate.Checked) {
-        $chkAutoUpdate.Checked = $false
-    }
-})
-
-$chkShortcut.Add_CheckedChanged({
-    $chkSilentStartup.Enabled = $chkShortcut.Checked
-    # [FIX] Hide completely if not checked
-    $chkSilentStartup.Visible = $chkShortcut.Checked
-    if (-not $chkShortcut.Checked) {
-        $chkSilentStartup.Checked = $false
-    }
-})
-
-$btnSaveScript.Add_Click({
-    $statusBox.Clear()
-    $savedPath = Save-ScriptToAppData -StatusBox $statusBox -Form $form
-    if ($savedPath) {
-        Update-ScriptStatusLabel
-        [System.Windows.Forms.MessageBox]::Show($form, "Script saved to:`n$savedPath`n`nYou can now create a startup shortcut.", "Script Saved", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-    }
-})
-
-$btnOpenBackups.Add_Click({
-    Initialize-BackupDirectory
-    Start-Process "explorer.exe" -ArgumentList $BACKUP_ROOT
-})
-
-# [LOGIC] Helper for GUI interaction with safe path finding
-function Get-RealClientPath {
-    param($ClientObj)
-    $path = $ClientObj.Path
-    # 1. Check Default
-    if (Test-Path $path) { return $path }
-    # 2. Check Fallback
-    if ($ClientObj.FallbackPath -and (Test-Path $ClientObj.FallbackPath)) { return $ClientObj.FallbackPath }
-    # 3. Check Process
-    foreach ($proc in $ClientObj.Processes) {
-        if ($proc -eq "Update") { continue }
-        $procPath = Get-PathFromProcess -ProcessName $proc
-        if ($procPath -and (Test-Path $procPath)) { return $procPath }
-    }
-    # 4. Check Shortcut
-    if ($ClientObj.Shortcut) {
-        $shortcutPath = Get-PathFromShortcuts -ShortcutName $ClientObj.Shortcut
-        if ($shortcutPath -and (Test-Path $shortcutPath)) { return $shortcutPath }
-    }
-    return $null
-}
+# Event Handlers
+$chkUpdate.Add_CheckedChanged({ $chkAutoUpdate.Enabled = $chkUpdate.Checked; $chkAutoUpdate.Visible = $chkUpdate.Checked; if (-not $chkUpdate.Checked) { $chkAutoUpdate.Checked = $false } })
+$chkShortcut.Add_CheckedChanged({ $chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; if (-not $chkShortcut.Checked) { $chkSilentStartup.Checked = $false } })
+$btnSaveScript.Add_Click({ $statusBox.Clear(); $sp = Save-ScriptToAppData $statusBox $form; if ($sp) { Update-ScriptStatusLabel; [System.Windows.Forms.MessageBox]::Show($form,"Script saved to:`n$sp`n`nYou can now create a startup shortcut.","Script Saved","OK","Information") } })
+$btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.exe" $BACKUP_ROOT })
 
 $clientCombo.Add_SelectedIndexChanged({
-    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
-    $basePath = Get-RealClientPath -ClientObj $selectedClient
-    
-    if (-not $basePath) {
-        $updateStatusLabel.Text = "Client not found"
-        $updateStatusLabel.ForeColor = $Theme.TextDim
-        return
-    }
-
-    $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
-    if ($updateCheck -and $updateCheck.Updated) {
-        $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
-        $updateStatusLabel.ForeColor = $Theme.Warning
-    } elseif ($updateCheck -and $updateCheck.LastFixDate) {
-        $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
-        $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
-        $updateStatusLabel.ForeColor = $Theme.TextSecondary
-    } else {
-        $updateStatusLabel.Text = ""
-    }
+    $sc = $DiscordClients[$clientCombo.SelectedIndex]; $bp = Get-RealClientPath $sc
+    if (-not $bp) { $updateStatusLabel.Text = "Client not found"; $updateStatusLabel.ForeColor = $Theme.TextDim; return }
+    $uc = Check-DiscordUpdated $bp $sc.Name
+    if ($uc -and $uc.Updated) { $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning }
+    elseif ($uc -and $uc.LastFixDate) { $lf = [DateTime]::Parse($uc.LastFixDate); $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
+    else { $updateStatusLabel.Text = "" }
 })
 
 $btnCheckUpdate.Add_Click({
-    $statusBox.Clear()
-    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    $statusBox.Clear(); $sc = $DiscordClients[$clientCombo.SelectedIndex]
     Add-Status $statusBox $form "Checking Discord version..." "Blue"
-    
-    $basePath = Get-RealClientPath -ClientObj $selectedClient
-    if (-not $basePath) {
-        Add-Status $statusBox $form "[X] Discord client not found (checked Default, Process, and Shortcuts)" "Red"
-        Add-Status $statusBox $form "    Try opening Discord first so we can detect the path." "Yellow"
-        return
-    }
-    
-    Add-Status $statusBox $form "Found installation at: $basePath" "Cyan"
-    $appPath = Find-DiscordAppPath -BasePath $basePath
-    if (-not $appPath) {
-        Add-Status $statusBox $form "[X] No Discord installation found" "Red"
-        return
-    }
-    $currentVersion = Get-DiscordAppVersion -AppPath $appPath
-    Add-Status $statusBox $form "Current version: $currentVersion" "Cyan"
-    $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
-    if ($updateCheck -and $updateCheck.Updated) {
+    $bp = Get-RealClientPath $sc
+    if (-not $bp) { Add-Status $statusBox $form "[X] Discord client not found (checked Default, Process, and Shortcuts)" "Red"; Add-Status $statusBox $form "    Try opening Discord first so we can detect the path." "Yellow"; return }
+    Add-Status $statusBox $form "Found installation at: $bp" "Cyan"
+    $ap = Find-DiscordAppPath $bp; if (-not $ap) { Add-Status $statusBox $form "[X] No Discord installation found" "Red"; return }
+    $cv = Get-DiscordAppVersion $ap; Add-Status $statusBox $form "Current version: $cv" "Cyan"
+    $uc = Check-DiscordUpdated $bp $sc.Name
+    if ($uc -and $uc.Updated) {
         Add-Status $statusBox $form "[!] Discord has been updated!" "Yellow"
-        Add-Status $statusBox $form "    Previous: v$($updateCheck.OldVersion)" "Orange"
-        Add-Status $statusBox $form "    Current:  v$($updateCheck.NewVersion)" "Orange"
+        Add-Status $statusBox $form "    Previous: v$($uc.OldVersion)" "Orange"; Add-Status $statusBox $form "    Current:  v$($uc.NewVersion)" "Orange"
         Add-Status $statusBox $form "    Re-applying the fix is recommended." "Yellow"
-        $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
-        $updateStatusLabel.ForeColor = $Theme.Warning
-    } elseif ($updateCheck -and $updateCheck.LastFixDate) {
-        $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
+        $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning
+    } elseif ($uc -and $uc.LastFixDate) {
+        $lf = [DateTime]::Parse($uc.LastFixDate)
         Add-Status $statusBox $form "[OK] No update detected since last fix" "LimeGreen"
-        Add-Status $statusBox $form "    Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
-        $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
-        $updateStatusLabel.ForeColor = $Theme.TextSecondary
-    } else {
-        Add-Status $statusBox $form "[!] No previous fix recorded for this client" "Yellow"
-        Add-Status $statusBox $form "    Run 'Start Fix' to apply the fix." "Cyan"
-        $updateStatusLabel.Text = ""
-    }
+        Add-Status $statusBox $form "    Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
+        $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
+    } else { Add-Status $statusBox $form "[!] No previous fix recorded for this client" "Yellow"; Add-Status $statusBox $form "    Run 'Start Fix' to apply the fix." "Cyan"; $updateStatusLabel.Text = "" }
 })
 
 $btnRollback.Add_Click({
-    $statusBox.Clear()
-    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
+    $statusBox.Clear(); $sc = $DiscordClients[$clientCombo.SelectedIndex]
     Add-Status $statusBox $form "Loading available backups..." "Blue"
-    $backups = Get-AvailableBackups
-    if ($backups.Count -eq 0) {
-        Add-Status $statusBox $form "[X] No backups found" "Red"
-        [System.Windows.Forms.MessageBox]::Show($form, "No backups available. Run 'Start Fix' first to create a backup.", "No Backups", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        return
-    }
-    $rollbackForm = New-Object System.Windows.Forms.Form
-    $rollbackForm.Text = "Select Backup to Restore"
-    $rollbackForm.Size = New-Object System.Drawing.Size(450, 300)
-    $rollbackForm.StartPosition = "CenterParent"
-    $rollbackForm.FormBorderStyle = "FixedDialog"
-    $rollbackForm.MaximizeBox = $false
-    $rollbackForm.MinimizeBox = $false
-    $rollbackForm.BackColor = $Theme.Background
-    $rollbackForm.TopMost = $true
-    $listBox = New-Object System.Windows.Forms.ListBox
-    $listBox.Location = New-Object System.Drawing.Point(20, 20)
-    $listBox.Size = New-Object System.Drawing.Size(395, 180)
-    $listBox.BackColor = $Theme.ControlBg
-    $listBox.ForeColor = $Theme.TextPrimary
-    $listBox.Font = $Fonts.Normal
-    foreach ($backup in $backups) { [void]$listBox.Items.Add($backup.DisplayName) }
-    $listBox.SelectedIndex = 0
-    $rollbackForm.Controls.Add($listBox)
-    $btnRestore = New-StyledButton -X 120 -Y 210 -Width 100 -Height 35 -Text "Restore"
-    $btnCancel = New-StyledButton -X 230 -Y 210 -Width 100 -Height 35 -Text "Cancel" -BackColor $Theme.Secondary
-    $rollbackForm.Controls.Add($btnRestore)
-    $rollbackForm.Controls.Add($btnCancel)
-    $btnCancel.Add_Click({ $rollbackForm.DialogResult = "Cancel"; $rollbackForm.Close() })
-    $btnRestore.Add_Click({ $rollbackForm.DialogResult = "OK"; $rollbackForm.Close() })
-    $result = $rollbackForm.ShowDialog($form)
-    if ($result -eq "OK" -and $listBox.SelectedIndex -ge 0) {
-        $selectedBackup = $backups[$listBox.SelectedIndex]
-        if (-not $selectedBackup -or -not $selectedBackup.Path) {
-            Add-Status $statusBox $form "[X] Invalid backup selection" "Red"
-            return
-        }
-        Add-Status $statusBox $form "Starting rollback..." "Blue"
-        Add-Status $statusBox $form "  Selected: $($selectedBackup.DisplayName)" "Cyan"
-        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
-        Stop-DiscordProcesses -ProcessNames $selectedClient.Processes
-        
-        $basePath = Get-RealClientPath -ClientObj $selectedClient
-        if (-not $basePath) {
-             Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"
-             return
-        }
-
-        $appPath = Find-DiscordAppPath -BasePath $basePath
-        if (-not $appPath) {
-            Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"
-            return
-        }
-        $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-        if (-not $voiceModule) {
-            Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"
-            return
-        }
-        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") { "$($voiceModule.FullName)\discord_voice" } else { $voiceModule.FullName }
-        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
-        $success = Restore-FromBackup -Backup $selectedBackup -TargetVoicePath $targetVoiceFolder -TargetFfmpegPath $ffmpegTarget -StatusBox $statusBox -Form $form
-        if ($success) {
+    $bks = Get-AvailableBackups
+    if ($bks.Count -eq 0) { Add-Status $statusBox $form "[X] No backups found" "Red"; [System.Windows.Forms.MessageBox]::Show($form,"No backups available. Run 'Start Fix' first to create a backup.","No Backups","OK","Information"); return }
+    
+    $rf = New-Object System.Windows.Forms.Form
+    $rf.Text = "Select Backup to Restore"; $rf.Size = New-Object System.Drawing.Size(450,300); $rf.StartPosition = "CenterParent"
+    $rf.FormBorderStyle = "FixedDialog"; $rf.MaximizeBox = $false; $rf.MinimizeBox = $false; $rf.BackColor = $Theme.Background; $rf.TopMost = $true
+    
+    $lb = New-Object System.Windows.Forms.ListBox
+    $lb.Location = New-Object System.Drawing.Point(20,20); $lb.Size = New-Object System.Drawing.Size(395,180)
+    $lb.BackColor = $Theme.ControlBg; $lb.ForeColor = $Theme.TextPrimary; $lb.Font = $Fonts.Normal
+    foreach ($b in $bks) { [void]$lb.Items.Add($b.DisplayName) }; $lb.SelectedIndex = 0; $rf.Controls.Add($lb)
+    
+    $br = New-StyledButton 120 210 100 35 "Restore"; $bc = New-StyledButton 230 210 100 35 "Cancel" $Fonts.Button $Theme.Secondary
+    $rf.Controls.Add($br); $rf.Controls.Add($bc)
+    $bc.Add_Click({ $rf.DialogResult = "Cancel"; $rf.Close() }); $br.Add_Click({ $rf.DialogResult = "OK"; $rf.Close() })
+    
+    $res = $rf.ShowDialog($form)
+    if ($res -eq "OK" -and $lb.SelectedIndex -ge 0) {
+        $sb = $bks[$lb.SelectedIndex]
+        if (-not $sb -or -not $sb.Path) { Add-Status $statusBox $form "[X] Invalid backup selection" "Red"; return }
+        Add-Status $statusBox $form "Starting rollback..." "Blue"; Add-Status $statusBox $form "  Selected: $($sb.DisplayName)" "Cyan"
+        Add-Status $statusBox $form "Closing Discord processes..." "Blue"; Stop-DiscordProcesses $sc.Processes
+        $bp = Get-RealClientPath $sc; if (-not $bp) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
+        $ap = Find-DiscordAppPath $bp; if (-not $ap) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
+        $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        if (-not $vm) { Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"; return }
+        $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
+        $fft = Join-Path $ap "ffmpeg.dll"
+        $suc = Restore-FromBackup $sb $tvf $fft $statusBox $form
+        if ($suc) {
             Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen"
-            if ($chkAutoStart.Checked) {
-                Add-Status $statusBox $form "Starting Discord..." "Blue"
-                $discordExe = Join-Path $appPath $selectedClient.Exe
-                Start-DiscordClient -ExePath $discordExe
-                Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
-            }
-            Play-CompletionSound -Success $true
-            [System.Windows.Forms.MessageBox]::Show($form, "Rollback completed successfully!", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+            if ($chkAutoStart.Checked) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; Start-DiscordClient $de; Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+            Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Rollback completed successfully!","Success","OK","Information")
         }
     }
 })
 
 $btnStart.Add_Click({
-    $btnStart.Enabled = $false
-    $btnFixAll.Enabled = $false
-    $btnRollback.Enabled = $false
-    $btnCheckUpdate.Enabled = $false
-    $statusBox.Clear()
-    $progressBar.Value = 0
-    $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
-
+    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false
+    $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    
     try {
-        $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
-
+        $sc = $DiscordClients[$clientCombo.SelectedIndex]
+        
+        # Check for updates
         if ($chkUpdate.Checked) {
-            Add-Status $statusBox $form "Checking for script updates..." "Blue"
-            Update-Progress $progressBar $form 5
+            Add-Status $statusBox $form "Checking for script updates..." "Blue"; Update-Progress $progressBar $form 5
             try {
-                $currentScript = $PSCommandPath
-                if ([string]::IsNullOrEmpty($currentScript)) {
-                    Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen"
-                } else {
-                    $updateFile = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
-                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $updateFile -UseBasicParsing -TimeoutSec 10
-                    $updateContent = (Get-Content $updateFile -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
-                    $currentContent = (Get-Content $currentScript -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
-                    $updateContent = $updateContent.Trim()
-                    $currentContent = $currentContent.Trim()
-                    if ($updateContent -ne $currentContent) {
+                $cs = $PSCommandPath
+                if ([string]::IsNullOrEmpty($cs)) { Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen" }
+                else {
+                    $uf = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
+                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $uf -UseBasicParsing -TimeoutSec 10
+                    $uc = (Get-Content $uf -Raw) -replace "`r`n","`n" -replace "`r","`n"; $cc = (Get-Content $cs -Raw) -replace "`r`n","`n" -replace "`r","`n"
+                    $uc = $uc.Trim(); $cc = $cc.Trim()
+                    if ($uc -ne $cc) {
                         Add-Status $statusBox $form "New update found!" "Yellow"
                         if ($chkAutoUpdate.Checked) {
                             Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
                             Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
-                            Start-Sleep -Seconds 3
-                            Apply-ScriptUpdate -UpdatedScriptPath $updateFile -CurrentScriptPath $currentScript
-                            $form.Close()
-                            return
-                        } else {
-                            Add-Status $statusBox $form "Update downloaded to: $updateFile" "Orange"
-                            Add-Status $statusBox $form "Please manually replace the script file to update." "Orange"
-                        }
-                    } else {
-                        Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"
-                        Remove-Item $updateFile -ErrorAction SilentlyContinue
-                    }
+                            Start-Sleep -Seconds 3; Apply-ScriptUpdate $uf $cs; $form.Close(); return
+                        } else { Add-Status $statusBox $form "Update downloaded to: $uf" "Orange"; Add-Status $statusBox $form "Please manually replace the script file to update." "Orange" }
+                    } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -EA SilentlyContinue }
                 }
-            } catch {
-                Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange"
-            }
+            } catch { Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange" }
         }
-
-        Update-Progress $progressBar $form 10
-        Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"
-        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-        $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
-        $voiceDownloadSuccess = Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $statusBox -Form $form
-        if (-not $voiceDownloadSuccess) { throw "Failed to download voice backup files from GitHub" }
+        
+        # Download files
+        Update-Progress $progressBar $form 10; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
+        $vbp = Join-Path $td "VoiceBackup"; $vds = Download-VoiceBackupFiles $vbp $statusBox $form
+        if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
         Update-Progress $progressBar $form 20
-        $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
-        $ffmpegDownloadSuccess = Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $statusBox -Form $form
-        if (-not $ffmpegDownloadSuccess) { throw "Failed to download ffmpeg.dll from GitHub" }
-        Add-Status $statusBox $form "[OK] All files downloaded successfully" "LimeGreen"
-        Update-Progress $progressBar $form 30
-
-        # [FIX] Get path BEFORE stopping processes (in case we need the process to find the path)
+        $ffp = Join-Path $td "ffmpeg.dll"; $fds = Download-FFmpeg $ffp $statusBox $form
+        if (-not $fds) { throw "Failed to download ffmpeg.dll from GitHub" }
+        Add-Status $statusBox $form "[OK] All files downloaded successfully" "LimeGreen"; Update-Progress $progressBar $form 30
+        
+        # Locate Discord
         Add-Status $statusBox $form "Locating Discord installation..." "Blue"
-        $basePath = Get-RealClientPath -ClientObj $selectedClient
+        $bp = Get-RealClientPath $sc; if (-not $bp) { throw "Discord client folder not found. Please ensure it is installed or run Discord so we can detect the path." }
+        Add-Status $statusBox $form "Path detected: $bp" "Cyan"
+        $ap = Find-DiscordAppPath $bp; if (-not $ap) { throw "No Discord app folder with voice module found in $bp" }
+        $av = Get-DiscordAppVersion $ap; Add-Status $statusBox $form "[OK] Found $($sc.Name) v$av" "LimeGreen"
         
-        if (-not $basePath) { throw "Discord client folder not found. Please ensure it is installed or run Discord so we can detect the path." }
-        Add-Status $statusBox $form "Path detected: $basePath" "Cyan"
-        
-        $appPath = Find-DiscordAppPath -BasePath $basePath
-        if (-not $appPath) { throw "No Discord app folder with voice module found in $basePath" }
-        $appVersion = Get-DiscordAppVersion -AppPath $appPath
-        Add-Status $statusBox $form "[OK] Found $($selectedClient.Name) v$appVersion" "LimeGreen"
-        
+        # Stop Discord
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"
-        $killedAny = Stop-DiscordProcesses -ProcessNames $selectedClient.Processes
-        if ($killedAny) { Add-Status $statusBox $form "  Discord processes terminated" "Cyan" }
-        else { Add-Status $statusBox $form "  No Discord processes were running" "Yellow" }
-        Update-Progress $progressBar $form 40
-        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
-
-        Update-Progress $progressBar $form 50
-
+        $ka = Stop-DiscordProcesses $sc.Processes
+        if ($ka) { Add-Status $statusBox $form "  Discord processes terminated" "Cyan" } else { Add-Status $statusBox $form "  No Discord processes were running" "Yellow" }
+        Update-Progress $progressBar $form 40; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 50
+        
+        # Locate voice module
         Add-Status $statusBox $form "Locating voice module..." "Blue"
-        $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-        if (-not $voiceModule) { throw "No discord_voice module found" }
-        $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") { "$($voiceModule.FullName)\discord_voice" } else { $voiceModule.FullName }
-        $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
-        Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"
-        Update-Progress $progressBar $form 55
-
+        $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        if (-not $vm) { throw "No discord_voice module found" }
+        $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
+        $fft = Join-Path $ap "ffmpeg.dll"; Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
+        
+        # Backup & Apply fix
         Add-Status $statusBox $form "Creating backup of current files..." "Blue"
-        Create-VoiceBackup -VoiceFolderPath $targetVoiceFolder -FfmpegPath $ffmpegTarget -ClientName $selectedClient.Name -AppVersion $appVersion -StatusBox $statusBox -Form $form | Out-Null
-        Remove-OldBackups -KeepCount 5
-        Update-Progress $progressBar $form 60
-
+        Create-VoiceBackup $tvf $fft $sc.Name $av $statusBox $form | Out-Null; Remove-OldBackups; Update-Progress $progressBar $form 60
+        
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
-        if (Test-Path $targetVoiceFolder) { 
-            Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue 
-        } else {
-            New-Item -Path $targetVoiceFolder -ItemType Directory -Force | Out-Null
-        }
-        Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"
-        Update-Progress $progressBar $form 70
-
+        if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+        Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"; Update-Progress $progressBar $form 70
+        
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
-        Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
-        Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"
-        Update-Progress $progressBar $form 80
-
+        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 80
+        
         Add-Status $statusBox $form "Copying ffmpeg.dll..." "Blue"
-        Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
-        Add-Status $statusBox $form "[OK] ffmpeg.dll replaced" "LimeGreen"
-        Update-Progress $progressBar $form 85
-
-        Save-FixState -ClientName $selectedClient.Name -Version $appVersion
-
+        Copy-Item $ffp $fft -Force; Add-Status $statusBox $form "[OK] ffmpeg.dll replaced" "LimeGreen"; Update-Progress $progressBar $form 85
+        Save-FixState $sc.Name $av
+        
+        # Startup shortcut
         if ($chkShortcut.Checked) {
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
-            $scriptPath = $SAVED_SCRIPT_PATH
-            if (-not (Test-Path $scriptPath)) { $scriptPath = Save-ScriptToAppData -StatusBox $statusBox -Form $form }
-            if ($scriptPath) {
-                Create-StartupShortcut -ScriptPath $scriptPath -RunSilent $chkSilentStartup.Checked
-                Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen"
-            } else {
-                Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange"
-            }
-        } else {
-            Remove-StartupShortcut
-        }
+            $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
+            if ($spt) { Create-StartupShortcut $spt $chkSilentStartup.Checked; Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
+            else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
+        } else { Remove-StartupShortcut }
         Update-Progress $progressBar $form 90
-
+        
+        # Start Discord
         if ($chkAutoStart.Checked) {
-            Add-Status $statusBox $form "Starting Discord..." "Blue"
-            $discordExe = Join-Path $appPath $selectedClient.Exe
-            $started = Start-DiscordClient -ExePath $discordExe
-            if (-not $started -and $selectedClient.FallbackPath) {
-                $fallbackApp = Find-DiscordAppPath -BasePath $selectedClient.FallbackPath
-                if ($fallbackApp) {
-                    $altExe = Join-Path $fallbackApp $selectedClient.Exe
-                    $started = Start-DiscordClient -ExePath $altExe
-                    if ($started) { Add-Status $statusBox $form "[OK] Discord started (from alternate location)" "LimeGreen" }
-                }
-            } elseif ($started) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
-            if (-not $started) { Add-Status $statusBox $form "[!] Could not find Discord executable" "Orange" }
+            Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; $st = Start-DiscordClient $de
+            if (-not $st -and $sc.FallbackPath) { $fa = Find-DiscordAppPath $sc.FallbackPath; if ($fa) { $ae = Join-Path $fa $sc.Exe; $st = Start-DiscordClient $ae; if ($st) { Add-Status $statusBox $form "[OK] Discord started (from alternate location)" "LimeGreen" } } }
+            elseif ($st) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+            if (-not $st) { Add-Status $statusBox $form "[!] Could not find Discord executable" "Orange" }
         }
-
+        
+        # Complete
         Update-Progress $progressBar $form 100
-        $updateStatusLabel.Text = "Last fixed: $(Get-Date -Format 'MMM dd, yyyy HH:mm') (v$appVersion)"
-        $updateStatusLabel.ForeColor = $Theme.TextSecondary
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
-        Play-CompletionSound -Success $true
-        Save-CurrentSettings
-        [System.Windows.Forms.MessageBox]::Show($form, "Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        $updateStatusLabel.Text = "Last fixed: $(Get-Date -Format 'MMM dd, yyyy HH:mm') (v$av)"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
+        Play-CompletionSound $true; Save-CurrentSettings
+        [System.Windows.Forms.MessageBox]::Show($form,"Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.","Success","OK","Information")
         $form.Close()
-    }
-    catch {
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
-        Play-CompletionSound -Success $false
-        [System.Windows.Forms.MessageBox]::Show($form, "An error occurred: $($_.Exception.Message)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    }
-    finally {
-        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
-        $btnStart.Enabled = $true
-        $btnFixAll.Enabled = $true
-        $btnRollback.Enabled = $true
-        $btnCheckUpdate.Enabled = $true
+    } catch {
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
+        Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
+    } finally {
+        if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
+        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true
     }
 })
 
 $btnFixAll.Add_Click({
-    $btnStart.Enabled = $false
-    $btnFixAll.Enabled = $false
-    $btnRollback.Enabled = $false
-    $btnCheckUpdate.Enabled = $false
-    $statusBox.Clear()
-    $progressBar.Value = 0
-    $tempDir = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
-
+    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false
+    $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    
     try {
         Add-Status $statusBox $form "Scanning for installed Discord clients..." "Blue"
-        $installedClients = Get-InstalledClients
-        if ($installedClients.Count -eq 0) {
-            Add-Status $statusBox $form "[X] No Discord clients found!" "Red"
-            Add-Status $statusBox $form "    Ensure Discord is installed or currently running." "Yellow"
-            [System.Windows.Forms.MessageBox]::Show($form, "No Discord clients were found on this system.", "No Clients Found", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-            return
+        $ic = Get-InstalledClients
+        if ($ic.Count -eq 0) {
+            Add-Status $statusBox $form "[X] No Discord clients found!" "Red"; Add-Status $statusBox $form "    Ensure Discord is installed or currently running." "Yellow"
+            [System.Windows.Forms.MessageBox]::Show($form,"No Discord clients were found on this system.","No Clients Found","OK","Warning"); return
         }
-
-        $uniquePaths = @{}
-        $uniqueClients = [System.Collections.ArrayList]@()
-        foreach ($client in $installedClients) {
-            if (-not $uniquePaths.ContainsKey($client.AppPath)) {
-                $uniquePaths[$client.AppPath] = $true
-                [void]$uniqueClients.Add($client)
-            }
-        }
-
-        Add-Status $statusBox $form "[OK] Found $($uniqueClients.Count) client(s):" "LimeGreen"
-        foreach ($client in $uniqueClients) {
-            $version = Get-DiscordAppVersion -AppPath $client.AppPath
-            Add-Status $statusBox $form "    - $($client.Name.Trim()) (v$version)" "Cyan"
-        }
+        
+        $up = @{}; $uc = [System.Collections.ArrayList]@()
+        foreach ($c in $ic) { if (-not $up.ContainsKey($c.AppPath)) { $up[$c.AppPath] = $true; [void]$uc.Add($c) } }
+        
+        Add-Status $statusBox $form "[OK] Found $($uc.Count) client(s):" "LimeGreen"
+        foreach ($c in $uc) { $v = Get-DiscordAppVersion $c.AppPath; Add-Status $statusBox $form "    - $($c.Name.Trim()) (v$v)" "Cyan" }
         Update-Progress $progressBar $form 5
-
-        $confirmResult = [System.Windows.Forms.MessageBox]::Show($form, "Found $($uniqueClients.Count) Discord client(s). Apply fix to all?", "Confirm Fix All", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
-        if ($confirmResult -ne "Yes") {
-            Add-Status $statusBox $form "Operation cancelled by user" "Yellow"
-            return
-        }
-
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"
-        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-        $voiceBackupPath = Join-Path $tempDir "VoiceBackup"
-        $voiceDownloadSuccess = Download-VoiceBackupFiles -DestinationPath $voiceBackupPath -StatusBox $statusBox -Form $form
-        if (-not $voiceDownloadSuccess) { throw "Failed to download voice backup files from GitHub" }
+        
+        $cr = [System.Windows.Forms.MessageBox]::Show($form,"Found $($uc.Count) Discord client(s). Apply fix to all?","Confirm Fix All","YesNo","Question")
+        if ($cr -ne "Yes") { Add-Status $statusBox $form "Operation cancelled by user" "Yellow"; return }
+        
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
+        $vbp = Join-Path $td "VoiceBackup"; $vds = Download-VoiceBackupFiles $vbp $statusBox $form
+        if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
         Update-Progress $progressBar $form 15
-        $ffmpegPath = Join-Path $tempDir "ffmpeg.dll"
-        $ffmpegDownloadSuccess = Download-FFmpeg -DestinationPath $ffmpegPath -StatusBox $statusBox -Form $form
-        if (-not $ffmpegDownloadSuccess) { throw "Failed to download ffmpeg.dll from GitHub" }
-        Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"
-        Update-Progress $progressBar $form 20
-
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
-        $allProcesses = @("Discord", "DiscordCanary", "DiscordPTB", "DiscordDevelopment", "BetterVencord", "Equicord", "Vencord", "Update")
-        Stop-DiscordProcesses -ProcessNames $allProcesses
-        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
-        Update-Progress $progressBar $form 30
-
-        $progressPerClient = 60 / $uniqueClients.Count
-        $currentProgress = 30
-        $fixedCount = 0
-        $failedClients = @()
-
-        foreach ($clientInfo in $uniqueClients) {
-            Add-Status $statusBox $form "" "White"
-            Add-Status $statusBox $form "=== Fixing: $($clientInfo.Name.Trim()) ===" "Blue"
+        $ffp = Join-Path $td "ffmpeg.dll"; $fds = Download-FFmpeg $ffp $statusBox $form
+        if (-not $fds) { throw "Failed to download ffmpeg.dll from GitHub" }
+        Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"; Update-Progress $progressBar $form 20
+        
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","BetterVencord","Equicord","Vencord","Update")
+        Stop-DiscordProcesses $allProcs; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
+        
+        $ppc = 60 / $uc.Count; $cp = 30; $fxc = 0; $fc = @()
+        foreach ($ci in $uc) {
+            Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== Fixing: $($ci.Name.Trim()) ===" "Blue"
             try {
-                $appPath = $clientInfo.AppPath
-                $appVersion = Get-DiscordAppVersion -AppPath $appPath
-                $voiceModule = Get-ChildItem -Path "$appPath\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-                if (-not $voiceModule) { throw "No discord_voice module found" }
-                $targetVoiceFolder = if (Test-Path "$($voiceModule.FullName)\discord_voice") { "$($voiceModule.FullName)\discord_voice" } else { $voiceModule.FullName }
-                $ffmpegTarget = Join-Path $appPath "ffmpeg.dll"
-                Add-Status $statusBox $form "  Creating backup..." "Cyan"
-                Create-VoiceBackup -VoiceFolderPath $targetVoiceFolder -FfmpegPath $ffmpegTarget -ClientName $clientInfo.Name -AppVersion $appVersion -StatusBox $statusBox -Form $form | Out-Null
-                
-                if (Test-Path $targetVoiceFolder) { 
-                    Remove-Item "$targetVoiceFolder\*" -Recurse -Force -ErrorAction SilentlyContinue 
-                } else {
-                    New-Item -Path $targetVoiceFolder -ItemType Directory -Force | Out-Null
-                }
-
-                Add-Status $statusBox $form "  Copying module files..." "Cyan"
-                Copy-Item -Path "$voiceBackupPath\*" -Destination $targetVoiceFolder -Recurse -Force
-                Add-Status $statusBox $form "  Copying ffmpeg.dll..." "Cyan"
-                Copy-Item -Path $ffmpegPath -Destination $ffmpegTarget -Force
-                Save-FixState -ClientName $clientInfo.Name -Version $appVersion
-                Add-Status $statusBox $form "[OK] $($clientInfo.Name.Trim()) fixed successfully" "LimeGreen"
-                $fixedCount++
-            }
-            catch {
-                Add-Status $statusBox $form "[X] Failed to fix $($clientInfo.Name.Trim()): $($_.Exception.Message)" "Red"
-                $failedClients += $clientInfo.Name
-            }
-            $currentProgress += $progressPerClient
-            Update-Progress $progressBar $form ([int]$currentProgress)
+                $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
+                $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                if (-not $vm) { throw "No discord_voice module found" }
+                $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
+                $fft = Join-Path $ap "ffmpeg.dll"
+                Add-Status $statusBox $form "  Creating backup..." "Cyan"; Create-VoiceBackup $tvf $fft $ci.Name $av $statusBox $form | Out-Null
+                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+                Add-Status $statusBox $form "  Copying module files..." "Cyan"; Copy-Item "$vbp\*" $tvf -Recurse -Force
+                Add-Status $statusBox $form "  Copying ffmpeg.dll..." "Cyan"; Copy-Item $ffp $fft -Force
+                Save-FixState $ci.Name $av; Add-Status $statusBox $form "[OK] $($ci.Name.Trim()) fixed successfully" "LimeGreen"; $fxc++
+            } catch { Add-Status $statusBox $form "[X] Failed to fix $($ci.Name.Trim()): $($_.Exception.Message)" "Red"; $fc += $ci.Name }
+            $cp += $ppc; Update-Progress $progressBar $form ([int]$cp)
         }
-
-        Remove-OldBackups -KeepCount 10
-        Update-Progress $progressBar $form 95
-
-        if ($chkAutoStart.Checked -and $fixedCount -gt 0) {
-            Add-Status $statusBox $form "" "White"
-            Add-Status $statusBox $form "Starting Discord..." "Blue"
-            $primaryClient = $uniqueClients[0]
-            $discordExe = Join-Path $primaryClient.AppPath $primaryClient.Client.Exe
-            if (Start-DiscordClient -ExePath $discordExe) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+        
+        Remove-OldBackups; Update-Progress $progressBar $form 95
+        if ($chkAutoStart.Checked -and $fxc -gt 0) {
+            Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Starting Discord..." "Blue"
+            $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe
+            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
         }
-
+        
         Update-Progress $progressBar $form 100
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "=== FIX ALL COMPLETED ===" "LimeGreen"
-        Add-Status $statusBox $form "Fixed: $fixedCount / $($uniqueClients.Count) clients" "Cyan"
-        Save-CurrentSettings
-
-        if ($failedClients.Count -gt 0) {
-            Play-CompletionSound -Success $false
-            [System.Windows.Forms.MessageBox]::Show($form, "Fixed $fixedCount of $($uniqueClients.Count) clients.`n`nFailed: $($failedClients -join ', ')", "Completed with Errors", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-        } else {
-            Play-CompletionSound -Success $true
-            [System.Windows.Forms.MessageBox]::Show($form, "Successfully fixed all $fixedCount Discord client(s)!", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        }
-    }
-    catch {
-        Add-Status $statusBox $form "" "White"
-        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
-        Play-CompletionSound -Success $false
-        [System.Windows.Forms.MessageBox]::Show($form, "An error occurred: $($_.Exception.Message)", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-    }
-    finally {
-        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
-        $btnStart.Enabled = $true
-        $btnFixAll.Enabled = $true
-        $btnRollback.Enabled = $true
-        $btnCheckUpdate.Enabled = $true
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== FIX ALL COMPLETED ===" "LimeGreen"
+        Add-Status $statusBox $form "Fixed: $fxc / $($uc.Count) clients" "Cyan"; Save-CurrentSettings
+        
+        if ($fc.Count -gt 0) { Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"Fixed $fxc of $($uc.Count) clients.`n`nFailed: $($fc -join ', ')","Completed with Errors","OK","Warning") }
+        else { Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Successfully fixed all $fxc Discord client(s)!","Success","OK","Information") }
+    } catch {
+        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
+        Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
+    } finally {
+        if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
+        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true
     }
 })
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 5000
-$timer.Add_Tick({ Update-DiscordRunningWarning })
-$timer.Start()
+# Timer & Form Events
+$timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 5000
+$timer.Add_Tick({ Update-DiscordRunningWarning }); $timer.Start()
 
 $form.Add_Shown({
-    $form.Activate()
-    Update-DiscordRunningWarning
-    Update-ScriptStatusLabel
-    
-    $selectedClient = $DiscordClients[$clientCombo.SelectedIndex]
-    $basePath = Get-RealClientPath -ClientObj $selectedClient
-    
-    if ($basePath) {
-        $updateCheck = Check-DiscordUpdated -ClientPath $basePath -ClientName $selectedClient.Name
-        if ($updateCheck -and $updateCheck.Updated) {
-            $updateStatusLabel.Text = "Discord updated! v$($updateCheck.OldVersion) -> v$($updateCheck.NewVersion) - Fix recommended"
-            $updateStatusLabel.ForeColor = $Theme.Warning
-        } elseif ($updateCheck -and $updateCheck.LastFixDate) {
-            $lastFix = [DateTime]::Parse($updateCheck.LastFixDate)
-            $updateStatusLabel.Text = "Last fixed: $($lastFix.ToString('MMM dd, yyyy HH:mm')) (v$($updateCheck.CurrentVersion))"
-            $updateStatusLabel.ForeColor = $Theme.TextSecondary
-        }
+    $form.Activate(); Update-DiscordRunningWarning; Update-ScriptStatusLabel
+    $sc = $DiscordClients[$clientCombo.SelectedIndex]; $bp = Get-RealClientPath $sc
+    if ($bp) {
+        $uc = Check-DiscordUpdated $bp $sc.Name
+        if ($uc -and $uc.Updated) { $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning }
+        elseif ($uc -and $uc.LastFixDate) { $lf = [DateTime]::Parse($uc.LastFixDate); $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
     }
 })
 

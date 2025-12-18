@@ -1,9 +1,8 @@
 param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
 
 # 1. Performance & Security Setup
-# Tls12 is required for GitHub.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# Disables the slow console progress bar to significantly speed up Invoke-WebRequest
+# Kills the download progress bars (Speed boost + Cleaner console)
 $ProgressPreference = 'SilentlyContinue'
 
 if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]"; exit 0 }
@@ -19,7 +18,7 @@ if ([System.Environment]::OSVersion.Version.Major -ge 6) {
     } catch {}
 }
 
-# 3. Theme & Fonts configuration
+# 3. Theme & Fonts
 $Theme = @{
     Background=[System.Drawing.Color]::FromArgb(32,34,37); ControlBg=[System.Drawing.Color]::FromArgb(47,49,54)
     Primary=[System.Drawing.Color]::FromArgb(88,101,242); Secondary=[System.Drawing.Color]::FromArgb(70,73,80)
@@ -48,9 +47,8 @@ $DiscordClients = [ordered]@{
     7 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
-# 5. Constants & Paths
+# 5. URLs & Paths
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
-# Note: Keeping specific ref to ensure stability of the downloaded files
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
 $FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/main/ffmpeg.dll"
 
@@ -135,7 +133,6 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $p = Get-Process -Name $ProcessNames -EA SilentlyContinue
     if ($p) {
         $p | Stop-Process -Force -EA SilentlyContinue
-        # Robust wait loop (up to 5 seconds)
         for ($i=0; $i -lt 20; $i++) {
             if (-not (Get-Process -Name $ProcessNames -EA SilentlyContinue)) { return $true }
             Start-Sleep -Milliseconds 250
@@ -146,7 +143,6 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
 }
 
 function Find-DiscordAppPath { param([string]$BasePath)
-    # Safely find folders starting with app-, sorting by version
     $af = gci $BasePath -Filter "app-*" -Directory -EA SilentlyContinue | 
         Sort-Object { 
             try { if ($_ -match "app-([\d\.]+)") { [Version]$matches[1] } else { $_.Name } } catch { $_.Name }
@@ -155,7 +151,6 @@ function Find-DiscordAppPath { param([string]$BasePath)
     foreach ($f in $af) {
         $mp = Join-Path $f.FullName "modules"
         if (Test-Path $mp) { 
-            # Look for the voice module specifically
             $vm = gci $mp -Filter "discord_voice*" -Directory -EA SilentlyContinue
             if ($vm) { return $f.FullName } 
         }
@@ -174,7 +169,7 @@ function Get-DiscordAppVersion { param([string]$AppPath)
 
 function Start-DiscordClient { param([string]$ExePath)
     if (Test-Path $ExePath) { 
-        Start-Process $ExePath -WindowStyle Normal
+        [void](Start-Process $ExePath -WindowStyle Normal -PassThru)
         return $true 
     }
     return $false
@@ -237,7 +232,7 @@ function Get-InstalledClients {
     return $inst
 }
 
-# 9. Download Logic (Robust)
+# 9. Download Logic (Output Silenced)
 function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         EnsureDir $DestinationPath
@@ -252,7 +247,6 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
             throw $_
         }
         
-        # Ensure $r is an array even if 1 item
         $r = @($r)
         
         if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
@@ -262,7 +256,8 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
             if ($f.type -eq "file") {
                 $fp = Join-Path $DestinationPath $f.name
                 Add-Status $StatusBox $Form "  Downloading: $($f.name)" "Cyan"
-                Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30; $fc++
+                Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30 | Out-Null
+                $fc++
             }
         }
         if ($fc -eq 0) { throw "No valid files found in repository." }
@@ -273,7 +268,7 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
 function Download-FFmpeg { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Add-Status $StatusBox $Form "  Downloading ffmpeg.dll from GitHub..." "Cyan"
-        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30
+        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30 | Out-Null
         if (-not (Test-Path $DestinationPath)) { throw "File did not download." }
         Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"; return $true
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"; return $false }
@@ -296,7 +291,6 @@ function Create-VoiceBackup {
         $vbp = Join-Path $bp "voice_module"
         Add-Status $StatusBox $Form "  Backing up voice module..." "Cyan"
         
-        # FIX: Ensure we copy contents, not the folder itself, into the backup destination
         EnsureDir $vbp
         if (Test-Path $VoiceFolderPath) {
             Copy-Item "$VoiceFolderPath\*" $vbp -Recurse -Force
@@ -382,7 +376,7 @@ function Save-ScriptToAppData { param([System.Windows.Forms.RichTextBox]$StatusB
             Add-Status $StatusBox $Form "[OK] Script saved to: $SAVED_SCRIPT_PATH" "LimeGreen"; return $SAVED_SCRIPT_PATH
         }
         Add-Status $StatusBox $Form "Downloading script from GitHub..." "Cyan"
-        Invoke-WebRequest -Uri $UPDATE_URL -OutFile $SAVED_SCRIPT_PATH -UseBasicParsing -TimeoutSec 30
+        Invoke-WebRequest -Uri $UPDATE_URL -OutFile $SAVED_SCRIPT_PATH -UseBasicParsing -TimeoutSec 30 | Out-Null
         Add-Status $StatusBox $Form "[OK] Script downloaded and saved" "LimeGreen"; return $SAVED_SCRIPT_PATH
     } catch { Add-Status $StatusBox $Form "[X] Failed to save script: $($_.Exception.Message)" "Red"; return $null }
 }
@@ -407,7 +401,7 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
     $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
     $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
     $bc | Out-File $bf -Encoding ASCII -Force
-    Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
+    [void](Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden -PassThru)
 }
 
 # === SILENT / CHECK-ONLY MODE ===
@@ -650,7 +644,7 @@ $btnStart.Add_Click({
                 if ([string]::IsNullOrEmpty($cs)) { Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen" }
                 else {
                     $uf = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
-                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $uf -UseBasicParsing -TimeoutSec 10
+                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $uf -UseBasicParsing -TimeoutSec 10 | Out-Null
                     $uc = (Get-Content $uf -Raw) -replace "`r`n","`n" -replace "`r","`n"; $cc = (Get-Content $cs -Raw) -replace "`r`n","`n" -replace "`r","`n"
                     $uc = $uc.Trim(); $cc = $cc.Trim()
                     if ($uc -ne $cc) {

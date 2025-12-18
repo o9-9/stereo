@@ -1,10 +1,25 @@
 param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
+
+# 1. Performance & Security Setup
+# Tls12 is required for GitHub.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Disables the slow console progress bar to significantly speed up Invoke-WebRequest
+$ProgressPreference = 'SilentlyContinue'
+
 if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]"; exit 0 }
 
+# 2. Load Assemblies & Visuals
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-# Theme & Fonts
+# Enable High DPI Support (Fixes blurry text on 125%+ scaling)
+if ([System.Environment]::OSVersion.Version.Major -ge 6) {
+    try {
+        [System.Windows.Forms.Application]::EnableVisualStyles()
+        [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+    } catch {}
+}
+
+# 3. Theme & Fonts configuration
 $Theme = @{
     Background=[System.Drawing.Color]::FromArgb(32,34,37); ControlBg=[System.Drawing.Color]::FromArgb(47,49,54)
     Primary=[System.Drawing.Color]::FromArgb(88,101,242); Secondary=[System.Drawing.Color]::FromArgb(70,73,80)
@@ -21,7 +36,7 @@ $Fonts = @{
     Small=New-Object System.Drawing.Font("Segoe UI",8.5)
 }
 
-# Discord Clients Configuration
+# 4. Discord Clients Database
 $DiscordClients = [ordered]@{
     0 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
     1 = @{Name="Discord - Canary         [Official]"; Path="$env:LOCALAPPDATA\DiscordCanary";      Processes=@("DiscordCanary","Update");      Exe="DiscordCanary.exe";      Shortcut="Discord Canary"}
@@ -33,38 +48,42 @@ $DiscordClients = [ordered]@{
     7 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
-# URLs & Paths
+# 5. Constants & Paths
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
+# Note: Keeping specific ref to ensure stability of the downloaded files
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
 $FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/main/ffmpeg.dll"
+
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"
 $BACKUP_ROOT = "$APP_DATA_ROOT\backups"
 $STATE_FILE = "$APP_DATA_ROOT\state.json"
 $SETTINGS_FILE = "$APP_DATA_ROOT\settings.json"
 $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
 
-# Helper: ensure directory exists
+# 6. Core Logic Functions
 function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
 
-# Settings Management
-function Get-DefaultSettings { @{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=4; SilentStartup=$false} }
+function Get-DefaultSettings { return [PSCustomObject]@{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=4; SilentStartup=$false} }
 
 function Load-Settings {
     $d = Get-DefaultSettings
     if (Test-Path $SETTINGS_FILE) {
-        try { $s = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
-            foreach ($k in $d.Keys) { if ($null -eq $s.$k) { $s | Add-Member -NotePropertyName $k -NotePropertyValue $d[$k] -Force } }
+        try { 
+            $s = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
+            foreach ($k in $d.PSObject.Properties.Name) { 
+                if ($null -eq $s.$k) { $s | Add-Member -NotePropertyName $k -NotePropertyValue $d.$k -Force } 
+            }
             return $s
         } catch { }
     }
-    return [PSCustomObject]$d
+    return $d
 }
 
 function Save-Settings { param([PSCustomObject]$Settings)
     try { EnsureDir (Split-Path $SETTINGS_FILE -Parent); $Settings | ConvertTo-Json -Depth 5 | Out-File $SETTINGS_FILE -Force } catch { }
 }
 
-# GUI Helper Functions
+# 7. GUI Elements
 function New-StyledLabel {
     param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text, [System.Drawing.Font]$Font=$Fonts.Normal,
           [System.Drawing.Color]$ForeColor=$Theme.TextPrimary, [string]$TextAlign="MiddleLeft")
@@ -90,58 +109,82 @@ function New-StyledButton {
 }
 
 function Add-Status {
-    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [string]$Message, [string]$Color="White")
-    if ($null -eq $StatusBox) { return }
+    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [string]$Message, [string]$ColorName="White")
+    if ($null -eq $StatusBox) { if ($Silent) { Write-Host $Message }; return }
+    
+    $c = try { [System.Drawing.Color]::FromName($ColorName) } catch { [System.Drawing.Color]::White }
+    
     $ts = Get-Date -Format "HH:mm:ss"
     $StatusBox.SelectionStart = $StatusBox.TextLength; $StatusBox.SelectionLength = 0
-    $StatusBox.SelectionColor = [System.Drawing.Color]::FromName($Color)
+    $StatusBox.SelectionColor = $c
     $StatusBox.AppendText("[$ts] $Message`r`n"); $StatusBox.ScrollToCaret()
-    if ($null -ne $Form) { $Form.Refresh() }
+    if ($null -ne $Form) { $Form.Refresh(); [System.Windows.Forms.Application]::DoEvents() }
 }
 
 function Play-CompletionSound { param([bool]$Success=$true)
-    if ($Success) { [System.Media.SystemSounds]::Exclamation.Play() } else { [System.Media.SystemSounds]::Hand.Play() }
+    try { if ($Success) { [System.Media.SystemSounds]::Exclamation.Play() } else { [System.Media.SystemSounds]::Hand.Play() } } catch {}
 }
 
 function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar, [System.Windows.Forms.Form]$Form, [int]$Value)
     if ($null -ne $ProgressBar) { $ProgressBar.Value = [Math]::Min($Value,100) }
-    if ($null -ne $Form) { $Form.Refresh() }
+    if ($null -ne $Form) { $Form.Refresh(); [System.Windows.Forms.Application]::DoEvents() }
 }
 
-# Process Management
+# 8. Process & Discord Handling
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $p = Get-Process -Name $ProcessNames -EA SilentlyContinue
     if ($p) {
-        $p | Stop-Process -Force -EA SilentlyContinue; $t = 0
-        while ((Get-Process -Name $ProcessNames -EA SilentlyContinue) -and $t -lt 10) { Start-Sleep -Milliseconds 500; $t++ }
+        $p | Stop-Process -Force -EA SilentlyContinue
+        # Robust wait loop (up to 5 seconds)
+        for ($i=0; $i -lt 20; $i++) {
+            if (-not (Get-Process -Name $ProcessNames -EA SilentlyContinue)) { return $true }
+            Start-Sleep -Milliseconds 250
+        }
         return $true
     }
     return $false
 }
 
-# Discord Path Detection
 function Find-DiscordAppPath { param([string]$BasePath)
+    # Safely find folders starting with app-, sorting by version
     $af = gci $BasePath -Filter "app-*" -Directory -EA SilentlyContinue | 
-        Sort-Object { if ($_ -match "app-([\d\.]+)") { [Version]$matches[1] } else { $_.Name } } -Descending
+        Sort-Object { 
+            try { if ($_ -match "app-([\d\.]+)") { [Version]$matches[1] } else { $_.Name } } catch { $_.Name }
+        } -Descending
+    
     foreach ($f in $af) {
         $mp = Join-Path $f.FullName "modules"
-        if (Test-Path $mp) { $vm = gci $mp -Filter "discord_voice*" -Directory -EA SilentlyContinue; if ($vm) { return $f.FullName } }
+        if (Test-Path $mp) { 
+            # Look for the voice module specifically
+            $vm = gci $mp -Filter "discord_voice*" -Directory -EA SilentlyContinue
+            if ($vm) { return $f.FullName } 
+        }
     }
     return $null
 }
 
 function Get-DiscordAppVersion { param([string]$AppPath)
-    if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }; return "Unknown"
+    if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }
+    try {
+        $exe = gci $AppPath -Filter "*.exe" | Select-Object -First 1
+        if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
+    } catch {}
+    return "Unknown"
 }
 
 function Start-DiscordClient { param([string]$ExePath)
-    if (Test-Path $ExePath) { Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true }
+    if (Test-Path $ExePath) { 
+        Start-Process $ExePath -WindowStyle Normal
+        return $true 
+    }
     return $false
 }
 
 function Get-PathFromProcess { param([string]$ProcessName)
-    $p = Get-Process -Name $ProcessName -EA SilentlyContinue | Select-Object -First 1
-    if ($p) { try { return (Split-Path (Split-Path $p.MainModule.FileName -Parent) -Parent) } catch { } }
+    try {
+        $p = Get-Process -Name $ProcessName -EA SilentlyContinue | Select-Object -First 1
+        if ($p) { return (Split-Path (Split-Path $p.MainModule.FileName -Parent) -Parent) }
+    } catch {}
     return $null
 }
 
@@ -160,10 +203,12 @@ function Get-RealClientPath { param($ClientObj)
     $p = $ClientObj.Path
     if (Test-Path $p) { return $p }
     if ($ClientObj.FallbackPath -and (Test-Path $ClientObj.FallbackPath)) { return $ClientObj.FallbackPath }
+    
     foreach ($pr in $ClientObj.Processes) {
         if ($pr -eq "Update") { continue }
         $pp = Get-PathFromProcess $pr; if ($pp -and (Test-Path $pp)) { return $pp }
     }
+    
     if ($ClientObj.Shortcut) { $sp = Get-PathFromShortcuts $ClientObj.Shortcut; if ($sp -and (Test-Path $sp)) { return $sp } }
     return $null
 }
@@ -172,58 +217,47 @@ function Get-InstalledClients {
     $inst = [System.Collections.ArrayList]@()
     foreach ($k in $DiscordClients.Keys) {
         $c = $DiscordClients[$k]; $fp = $null
+        
         if (Test-Path $c.Path) { $fp = $c.Path }
         elseif ($c.FallbackPath -and (Test-Path $c.FallbackPath)) { $fp = $c.FallbackPath }
-        else { foreach ($pn in $c.Processes) { if ($pn -eq "Update") { continue }; $dp = Get-PathFromProcess $pn; if ($dp -and (Test-Path $dp)) { $fp = $dp; break } } }
+        else { 
+            foreach ($pn in $c.Processes) { 
+                if ($pn -eq "Update") { continue }
+                $dp = Get-PathFromProcess $pn
+                if ($dp -and (Test-Path $dp)) { $fp = $dp; break } 
+            } 
+        }
         if (-not $fp -and $c.Shortcut) { $sp = Get-PathFromShortcuts $c.Shortcut; if ($sp -and (Test-Path $sp)) { $fp = $sp } }
-        if ($fp) { $ap = Find-DiscordAppPath $fp; if ($ap) { [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c}); continue } }
+        
+        if ($fp) { 
+            $ap = Find-DiscordAppPath $fp
+            if ($ap) { [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c}); continue } 
+        }
     }
     return $inst
 }
 
-# Script & Shortcut Management
-function Save-ScriptToAppData { param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
-    try {
-        EnsureDir (Split-Path $SAVED_SCRIPT_PATH -Parent)
-        if (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) {
-            Copy-Item $PSCommandPath $SAVED_SCRIPT_PATH -Force
-            Add-Status $StatusBox $Form "[OK] Script saved to: $SAVED_SCRIPT_PATH" "LimeGreen"; return $SAVED_SCRIPT_PATH
-        }
-        Add-Status $StatusBox $Form "Downloading script from GitHub..." "Cyan"
-        Invoke-WebRequest -Uri $UPDATE_URL -OutFile $SAVED_SCRIPT_PATH -UseBasicParsing -TimeoutSec 30
-        Add-Status $StatusBox $Form "[OK] Script downloaded and saved" "LimeGreen"; return $SAVED_SCRIPT_PATH
-    } catch { Add-Status $StatusBox $Form "[X] Failed to save script: $($_.Exception.Message)" "Red"; return $null }
-}
-
-function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$false)
-    $sf = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
-    $sp = Join-Path $sf "DiscordVoiceFixer.lnk"
-    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($sp)
-    $sc.TargetPath = "powershell.exe"
-    $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
-    if ($RunSilent) { $ar += " -Silent" }
-    $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
-    return $true
-}
-
-function Remove-StartupShortcut {
-    $sp = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
-    if (Test-Path $sp) { Remove-Item $sp -Force -EA SilentlyContinue }
-}
-
-function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
-    $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
-    $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
-    $bc | Out-File $bf -Encoding ASCII -Force
-    Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
-}
-
-# Download Functions
+# 9. Download Logic (Robust)
 function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         EnsureDir $DestinationPath
         Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
-        $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30; $fc = 0
+        
+        try {
+            $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30
+        } catch {
+            if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Forbidden) {
+                throw "GitHub API Rate Limit exceeded. Please try again later."
+            }
+            throw $_
+        }
+        
+        # Ensure $r is an array even if 1 item
+        $r = @($r)
+        
+        if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
+
+        $fc = 0
         foreach ($f in $r) {
             if ($f.type -eq "file") {
                 $fp = Join-Path $DestinationPath $f.name
@@ -231,19 +265,21 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
                 Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30; $fc++
             }
         }
+        if ($fc -eq 0) { throw "No valid files found in repository." }
         Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"; return $true
-    } catch { Add-Status $StatusBox $Form "  [X] Failed to download voice backup files: $($_.Exception.Message)" "Red"; return $false }
+    } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; return $false }
 }
 
 function Download-FFmpeg { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Add-Status $StatusBox $Form "  Downloading ffmpeg.dll from GitHub..." "Cyan"
         Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30
+        if (-not (Test-Path $DestinationPath)) { throw "File did not download." }
         Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"; return $true
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"; return $false }
 }
 
-# Backup & State Management
+# 10. Backup/Restore Logic
 function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
 function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
 function Save-StateData { param([hashtable]$State); $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force }
@@ -259,8 +295,15 @@ function Create-VoiceBackup {
         $bp = Join-Path $BACKUP_ROOT $bn; try { [void](New-Item $bp -ItemType Directory -Force) } catch { }
         $vbp = Join-Path $bp "voice_module"
         Add-Status $StatusBox $Form "  Backing up voice module..." "Cyan"
-        Copy-Item $VoiceFolderPath $vbp -Recurse -Force
+        
+        # FIX: Ensure we copy contents, not the folder itself, into the backup destination
+        EnsureDir $vbp
+        if (Test-Path $VoiceFolderPath) {
+            Copy-Item "$VoiceFolderPath\*" $vbp -Recurse -Force
+        }
+        
         if (Test-Path $FfmpegPath) { Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"; Copy-Item $FfmpegPath (Join-Path $bp "ffmpeg.dll") -Force }
+        
         @{ClientName=$ClientName; AppVersion=$AppVersion; BackupDate=(Get-Date).ToString("o"); VoiceModulePath=$VoiceFolderPath; FfmpegPath=$FfmpegPath} | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
         Add-Status $StatusBox $Form "[OK] Backup created: $bn" "LimeGreen"; return $bp
     } catch { Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"; return $null }
@@ -313,9 +356,13 @@ function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
     $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
     $ap = Find-DiscordAppPath $ClientPath; if (-not $ap) { return $null }
     $cv = Get-DiscordAppVersion $ap
-    $lv = $st.$ck.LastFixedVersion; $lfd = $st.$ck.LastFixDate
-    if ($lv -and $cv -ne $lv) { return @{Updated=$true; OldVersion=$lv; NewVersion=$cv; LastFixDate=$lfd; CurrentVersion=$cv} }
-    return @{Updated=$false; CurrentVersion=$cv; LastFixDate=$lfd}
+    
+    if ($st.$ck) {
+        $lv = $st.$ck.LastFixedVersion; $lfd = $st.$ck.LastFixDate
+        if ($lv -and $cv -ne $lv) { return @{Updated=$true; OldVersion=$lv; NewVersion=$cv; LastFixDate=$lfd; CurrentVersion=$cv} }
+        return @{Updated=$false; CurrentVersion=$cv; LastFixDate=$lfd}
+    }
+    return @{Updated=$false; CurrentVersion=$cv; LastFixDate=$null}
 }
 
 function Save-FixState { param([string]$ClientName, [string]$Version)
@@ -325,6 +372,42 @@ function Save-FixState { param([string]$ClientName, [string]$Version)
     $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
     $st[$ck] = @{LastFixedVersion=$Version; LastFixDate=(Get-Date).ToString("o")}
     Save-StateData $st
+}
+
+function Save-ScriptToAppData { param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
+    try {
+        EnsureDir (Split-Path $SAVED_SCRIPT_PATH -Parent)
+        if (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) {
+            Copy-Item $PSCommandPath $SAVED_SCRIPT_PATH -Force
+            Add-Status $StatusBox $Form "[OK] Script saved to: $SAVED_SCRIPT_PATH" "LimeGreen"; return $SAVED_SCRIPT_PATH
+        }
+        Add-Status $StatusBox $Form "Downloading script from GitHub..." "Cyan"
+        Invoke-WebRequest -Uri $UPDATE_URL -OutFile $SAVED_SCRIPT_PATH -UseBasicParsing -TimeoutSec 30
+        Add-Status $StatusBox $Form "[OK] Script downloaded and saved" "LimeGreen"; return $SAVED_SCRIPT_PATH
+    } catch { Add-Status $StatusBox $Form "[X] Failed to save script: $($_.Exception.Message)" "Red"; return $null }
+}
+
+function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$false)
+    $sf = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+    $sp = Join-Path $sf "DiscordVoiceFixer.lnk"
+    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($sp)
+    $sc.TargetPath = "powershell.exe"
+    $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
+    if ($RunSilent) { $ar += " -Silent" }
+    $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
+    return $true
+}
+
+function Remove-StartupShortcut {
+    $sp = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
+    if (Test-Path $sp) { Remove-Item $sp -Force -EA SilentlyContinue }
+}
+
+function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
+    $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
+    $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
+    $bc | Out-File $bf -Encoding ASCII -Force
+    Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
 }
 
 # === SILENT / CHECK-ONLY MODE ===
@@ -352,8 +435,12 @@ if ($Silent -or $CheckOnly) {
     $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"; EnsureDir $td
     
     try {
-        $vbp = Join-Path $td "VoiceBackup"; Download-VoiceBackupFiles $vbp $null $null | Out-Null
-        $ffp = Join-Path $td "ffmpeg.dll"; Download-FFmpeg $ffp $null $null | Out-Null
+        $vbp = Join-Path $td "VoiceBackup"; 
+        if (-not (Download-VoiceBackupFiles $vbp $null $null)) { throw "Download Failed" }
+        
+        $ffp = Join-Path $td "ffmpeg.dll"; 
+        if (-not (Download-FFmpeg $ffp $null $null)) { throw "Download Failed" }
+        
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs; Start-Sleep -Seconds 1
         $set = Load-Settings; $fxc = 0
@@ -580,10 +667,13 @@ $btnStart.Add_Click({
         
         # Download files
         Update-Progress $progressBar $form 10; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
-        $vbp = Join-Path $td "VoiceBackup"; $vds = Download-VoiceBackupFiles $vbp $statusBox $form
+        $vbp = Join-Path $td "VoiceBackup"
+        $vds = Download-VoiceBackupFiles $vbp $statusBox $form
         if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
+        
         Update-Progress $progressBar $form 20
-        $ffp = Join-Path $td "ffmpeg.dll"; $fds = Download-FFmpeg $ffp $statusBox $form
+        $ffp = Join-Path $td "ffmpeg.dll"
+        $fds = Download-FFmpeg $ffp $statusBox $form
         if (-not $fds) { throw "Failed to download ffmpeg.dll from GitHub" }
         Add-Status $statusBox $form "[OK] All files downloaded successfully" "LimeGreen"; Update-Progress $progressBar $form 30
         
@@ -678,11 +768,12 @@ $btnFixAll.Add_Click({
         if ($cr -ne "Yes") { Add-Status $statusBox $form "Operation cancelled by user" "Yellow"; return }
         
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
-        $vbp = Join-Path $td "VoiceBackup"; $vds = Download-VoiceBackupFiles $vbp $statusBox $form
-        if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
+        $vbp = Join-Path $td "VoiceBackup"; 
+        if (-not (Download-VoiceBackupFiles $vbp $statusBox $form)) { throw "Failed to download voice backup files" }
         Update-Progress $progressBar $form 15
-        $ffp = Join-Path $td "ffmpeg.dll"; $fds = Download-FFmpeg $ffp $statusBox $form
-        if (-not $fds) { throw "Failed to download ffmpeg.dll from GitHub" }
+        
+        $ffp = Join-Path $td "ffmpeg.dll"; 
+        if (-not (Download-FFmpeg $ffp $statusBox $form)) { throw "Failed to download ffmpeg.dll" }
         Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"; Update-Progress $progressBar $form 20
         
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"

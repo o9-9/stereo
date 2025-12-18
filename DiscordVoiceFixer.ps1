@@ -2,7 +2,6 @@ param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
 
 # 1. Performance & Security Setup
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# Kills download progress bars (Speed boost + Cleaner console)
 $ProgressPreference = 'SilentlyContinue'
 
 if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]"; exit 0 }
@@ -10,7 +9,7 @@ if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-S
 # 2. Load Assemblies & Visuals
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-# Enable High DPI Support (Fixes blurry text on 125%+ scaling)
+# Enable High DPI Support
 if ([System.Environment]::OSVersion.Version.Major -ge 6) {
     try {
         [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -36,15 +35,17 @@ $Fonts = @{
 }
 
 # 4. Discord Clients Database
+# Ordered: Officials first to prevent mods (that share folders) from mislabeling the client.
 $DiscordClients = [ordered]@{
-    0 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
+    0 = @{Name="Discord - Stable         [Official]"; Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
     1 = @{Name="Discord - Canary         [Official]"; Path="$env:LOCALAPPDATA\DiscordCanary";      Processes=@("DiscordCanary","Update");      Exe="DiscordCanary.exe";      Shortcut="Discord Canary"}
-    2 = @{Name="Discord - Development    [Official]"; Path="$env:LOCALAPPDATA\DiscordDevelopment"; Processes=@("DiscordDevelopment","Update"); Exe="DiscordDevelopment.exe"; Shortcut="Discord Development"}
-    3 = @{Name="Discord - PTB            [Official]"; Path="$env:LOCALAPPDATA\DiscordPTB";         Processes=@("DiscordPTB","Update");         Exe="DiscordPTB.exe";         Shortcut="Discord PTB"}
-    4 = @{Name="Discord - Stable         [Official]"; Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
-    5 = @{Name="Equicord                 [Mod]";      Path="$env:LOCALAPPDATA\Equicord";           FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Equicord","Discord","Update");      Exe="Discord.exe"; Shortcut="Equicord"}
+    2 = @{Name="Discord - PTB            [Official]"; Path="$env:LOCALAPPDATA\DiscordPTB";         Processes=@("DiscordPTB","Update");         Exe="DiscordPTB.exe";         Shortcut="Discord PTB"}
+    3 = @{Name="Discord - Development    [Official]"; Path="$env:LOCALAPPDATA\DiscordDevelopment"; Processes=@("DiscordDevelopment","Update"); Exe="DiscordDevelopment.exe"; Shortcut="Discord Development"}
+    4 = @{Name="Lightcord                [Mod]";      Path="$env:LOCALAPPDATA\Lightcord";          Processes=@("Lightcord","Update");          Exe="Lightcord.exe";          Shortcut="Lightcord"}
+    5 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
     6 = @{Name="Vencord                  [Mod]";      Path="$env:LOCALAPPDATA\Vencord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Vencord","Discord","Update");       Exe="Discord.exe"; Shortcut="Vencord"}
-    7 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
+    7 = @{Name="Equicord                 [Mod]";      Path="$env:LOCALAPPDATA\Equicord";           FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Equicord","Discord","Update");      Exe="Discord.exe"; Shortcut="Equicord"}
+    8 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
 # 5. URLs & Paths
@@ -61,7 +62,7 @@ $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
 # 6. Core Logic Functions
 function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
 
-function Get-DefaultSettings { return [PSCustomObject]@{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=4; SilentStartup=$false} }
+function Get-DefaultSettings { return [PSCustomObject]@{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=0; SilentStartup=$false} }
 
 function Load-Settings {
     $d = Get-DefaultSettings
@@ -168,8 +169,7 @@ function Get-DiscordAppVersion { param([string]$AppPath)
 }
 
 function Start-DiscordClient { param([string]$ExePath)
-    # Using 'cmd /c start' is crucial here. 
-    # It detaches Discord from the PowerShell console, suppressing all Electron/Debug logs.
+    # Using 'cmd /c start' detaches the process, preventing Electron log spam in the console.
     if (Test-Path $ExePath) { 
         Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden
         return $true 
@@ -212,6 +212,9 @@ function Get-RealClientPath { param($ClientObj)
 
 function Get-InstalledClients {
     $inst = [System.Collections.ArrayList]@()
+    # HashSet allows us to ignore duplicates (e.g. Vencord in the Discord folder)
+    $foundPaths = [System.Collections.Generic.HashSet[string]]@()
+
     foreach ($k in $DiscordClients.Keys) {
         $c = $DiscordClients[$k]; $fp = $null
         
@@ -227,8 +230,16 @@ function Get-InstalledClients {
         if (-not $fp -and $c.Shortcut) { $sp = Get-PathFromShortcuts $c.Shortcut; if ($sp -and (Test-Path $sp)) { $fp = $sp } }
         
         if ($fp) { 
+            try { $fp = (Get-Item $fp).FullName } catch {}
+
+            # DEDUPLICATION: If we already found this exact folder, skip it.
+            if ($foundPaths.Contains($fp)) { continue }
+
             $ap = Find-DiscordAppPath $fp
-            if ($ap) { [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c}); continue } 
+            if ($ap) { 
+                [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c})
+                [void]$foundPaths.Add($fp)
+            } 
         }
     }
     return $inst
@@ -437,7 +448,7 @@ if ($Silent -or $CheckOnly) {
         $ffp = Join-Path $td "ffmpeg.dll"; 
         if (-not (Download-FFmpeg $ffp $null $null)) { throw "Download Failed" }
         
-        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","BetterVencord","Equicord","Vencord","Update")
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs; Start-Sleep -Seconds 1
         $set = Load-Settings; $fxc = 0
         
@@ -542,7 +553,7 @@ function Update-ScriptStatusLabel {
 }
 
 function Update-DiscordRunningWarning {
-    $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment")
+    $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
     $r = Get-Process -Name $dp -EA SilentlyContinue
     if ($r) { $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"; $discordRunningLabel.Visible = $true }
     else { $discordRunningLabel.Text = ""; $discordRunningLabel.Visible = $false }
@@ -773,7 +784,7 @@ $btnFixAll.Add_Click({
         Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"; Update-Progress $progressBar $form 20
         
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
-        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","BetterVencord","Equicord","Vencord","Update")
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
         
         $ppc = 60 / $uc.Count; $cp = 30; $fxc = 0; $fc = @()

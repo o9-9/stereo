@@ -2,7 +2,7 @@ param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
 
 # 1. Performance & Security Setup
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-# Kills the download progress bars (Speed boost + Cleaner console)
+# Kills download progress bars (Speed boost + Cleaner console)
 $ProgressPreference = 'SilentlyContinue'
 
 if ($Help) { Write-Host "Discord Voice Fixer`nUsage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]"; exit 0 }
@@ -168,8 +168,10 @@ function Get-DiscordAppVersion { param([string]$AppPath)
 }
 
 function Start-DiscordClient { param([string]$ExePath)
+    # Using 'cmd /c start' is crucial here. 
+    # It detaches Discord from the PowerShell console, suppressing all Electron/Debug logs.
     if (Test-Path $ExePath) { 
-        [void](Start-Process $ExePath -WindowStyle Normal -PassThru)
+        Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden
         return $true 
     }
     return $false
@@ -401,7 +403,7 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
     $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
     $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
     $bc | Out-File $bf -Encoding ASCII -Force
-    [void](Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden -PassThru)
+    Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
 }
 
 # === SILENT / CHECK-ONLY MODE ===

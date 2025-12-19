@@ -325,9 +325,14 @@ function Get-AvailableBackups {
         if (Test-Path $mp) {
             try {
                 $m = Get-Content $mp -Raw | ConvertFrom-Json
-                [void]$bks.Add(@{Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion
-                    BackupDate=[DateTime]::Parse($m.BackupDate)
-                    DisplayName="$($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"})
+                [void]$bks.Add(@{
+                    Path=$f.FullName; 
+                    Name=$f.Name; 
+                    ClientName=$m.ClientName; 
+                    AppVersion=$m.AppVersion;
+                    BackupDate=[DateTime]::Parse($m.BackupDate);
+                    DisplayName="$($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
+                })
             } catch { continue }
         }
     }

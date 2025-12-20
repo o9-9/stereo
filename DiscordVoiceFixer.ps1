@@ -51,7 +51,6 @@ $DiscordClients = [ordered]@{
 # 5. URLs & Paths
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup?ref=c23e2fdc4916bf9c2ad7b8c479e590727bf84c11"
-$FFMPEG_URL = "https://github.com/ProdHallow/voice-backup/raw/main/ffmpeg.dll"
 
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"
 $BACKUP_ROOT = "$APP_DATA_ROOT\backups"
@@ -278,22 +277,13 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; return $false }
 }
 
-function Download-FFmpeg { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
-    try {
-        Add-Status $StatusBox $Form "  Downloading ffmpeg.dll from GitHub..." "Cyan"
-        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $DestinationPath -UseBasicParsing -TimeoutSec 30 | Out-Null
-        if (-not (Test-Path $DestinationPath)) { throw "File did not download." }
-        Add-Status $StatusBox $Form "  ffmpeg.dll downloaded successfully" "Cyan"; return $true
-    } catch { Add-Status $StatusBox $Form "  [X] Failed to download ffmpeg.dll: $($_.Exception.Message)" "Red"; return $false }
-}
-
 # 10. Backup/Restore Logic
 function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
 function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
 function Save-StateData { param([hashtable]$State); $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force }
 
 function Create-VoiceBackup { 
-    param([string]$VoiceFolderPath, [string]$FfmpegPath, [string]$ClientName, [string]$AppVersion,
+    param([string]$VoiceFolderPath, [string]$ClientName, [string]$AppVersion,
           [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Initialize-BackupDirectory
@@ -309,9 +299,7 @@ function Create-VoiceBackup {
             Copy-Item "$VoiceFolderPath\*" $vbp -Recurse -Force
         }
         
-        if (Test-Path $FfmpegPath) { Add-Status $StatusBox $Form "  Backing up ffmpeg.dll..." "Cyan"; Copy-Item $FfmpegPath (Join-Path $bp "ffmpeg.dll") -Force }
-        
-        @{ClientName=$ClientName; AppVersion=$AppVersion; BackupDate=(Get-Date).ToString("o"); VoiceModulePath=$VoiceFolderPath; FfmpegPath=$FfmpegPath} | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
+        @{ClientName=$ClientName; AppVersion=$AppVersion; BackupDate=(Get-Date).ToString("o"); VoiceModulePath=$VoiceFolderPath} | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
         Add-Status $StatusBox $Form "[OK] Backup created: $bn" "LimeGreen"; return $bp
     } catch { Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"; return $null }
 }
@@ -340,16 +328,15 @@ function Get-AvailableBackups {
 }
 
 function Restore-FromBackup {
-    param([hashtable]$Backup, [string]$TargetVoicePath, [string]$TargetFfmpegPath,
+    param([hashtable]$Backup, [string]$TargetVoicePath,
           [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
-        $vbp = Join-Path $Backup.Path "voice_module"; $fbp = Join-Path $Backup.Path "ffmpeg.dll"
+        $vbp = Join-Path $Backup.Path "voice_module"
         if (Test-Path $vbp) {
             Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
             if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $TargetVoicePath }
             Copy-Item "$vbp\*" $TargetVoicePath -Recurse -Force
         }
-        if (Test-Path $fbp) { Add-Status $StatusBox $Form "  Restoring ffmpeg.dll..." "Cyan"; Copy-Item $fbp $TargetFfmpegPath -Force }
         return $true
     } catch { Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"; return $false }
 }
@@ -450,9 +437,6 @@ if ($Silent -or $CheckOnly) {
         $vbp = Join-Path $td "VoiceBackup"; 
         if (-not (Download-VoiceBackupFiles $vbp $null $null)) { throw "Download Failed" }
         
-        $ffp = Join-Path $td "ffmpeg.dll"; 
-        if (-not (Download-FFmpeg $ffp $null $null)) { throw "Download Failed" }
-        
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs; Start-Sleep -Seconds 1
         $set = Load-Settings; $fxc = 0
@@ -464,10 +448,10 @@ if ($Silent -or $CheckOnly) {
                 $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
                 if (-not $vm) { throw "No voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-                $fft = Join-Path $ap "ffmpeg.dll"
-                Create-VoiceBackup $tvf $fft $cl.Name $av $null $null | Out-Null
+                
+                Create-VoiceBackup $tvf $cl.Name $av $null $null | Out-Null
                 if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
-                Copy-Item "$vbp\*" $tvf -Recurse -Force; Copy-Item $ffp $fft -Force
+                Copy-Item "$vbp\*" $tvf -Recurse -Force
                 Save-FixState $cl.Name $av; Write-Host "  [OK] Fixed successfully"; $fxc++
             } catch { Write-Host "  [FAIL] $($_.Exception.Message)" }
         }
@@ -637,8 +621,8 @@ $btnRollback.Add_Click({
         $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
         if (-not $vm) { Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"; return }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-        $fft = Join-Path $ap "ffmpeg.dll"
-        $suc = Restore-FromBackup $sb $tvf $fft $statusBox $form
+        
+        $suc = Restore-FromBackup $sb $tvf $statusBox $form
         if ($suc) {
             Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen"
             if ($chkAutoStart.Checked) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; Start-DiscordClient $de; Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
@@ -682,12 +666,7 @@ $btnStart.Add_Click({
         $vbp = Join-Path $td "VoiceBackup"
         $vds = Download-VoiceBackupFiles $vbp $statusBox $form
         if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
-        
-        Update-Progress $progressBar $form 20
-        $ffp = Join-Path $td "ffmpeg.dll"
-        $fds = Download-FFmpeg $ffp $statusBox $form
-        if (-not $fds) { throw "Failed to download ffmpeg.dll from GitHub" }
-        Add-Status $statusBox $form "[OK] All files downloaded successfully" "LimeGreen"; Update-Progress $progressBar $form 30
+        Add-Status $statusBox $form "[OK] Files downloaded successfully" "LimeGreen"; Update-Progress $progressBar $form 30
         
         # Locate Discord
         Add-Status $statusBox $form "Locating Discord installation..." "Blue"
@@ -707,21 +686,19 @@ $btnStart.Add_Click({
         $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
         if (-not $vm) { throw "No discord_voice module found" }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-        $fft = Join-Path $ap "ffmpeg.dll"; Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
+        Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
         
         # Backup & Apply fix
         Add-Status $statusBox $form "Creating backup of current files..." "Blue"
-        Create-VoiceBackup $tvf $fft $sc.Name $av $statusBox $form | Out-Null; Remove-OldBackups; Update-Progress $progressBar $form 60
+        Create-VoiceBackup $tvf $sc.Name $av $statusBox $form | Out-Null; Remove-OldBackups; Update-Progress $progressBar $form 60
         
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
         if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
         Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"; Update-Progress $progressBar $form 70
         
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
-        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 80
+        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 85
         
-        Add-Status $statusBox $form "Copying ffmpeg.dll..." "Blue"
-        Copy-Item $ffp $fft -Force; Add-Status $statusBox $form "[OK] ffmpeg.dll replaced" "LimeGreen"; Update-Progress $progressBar $form 85
         Save-FixState $sc.Name $av
         
         # Startup shortcut
@@ -782,11 +759,7 @@ $btnFixAll.Add_Click({
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
         $vbp = Join-Path $td "VoiceBackup"; 
         if (-not (Download-VoiceBackupFiles $vbp $statusBox $form)) { throw "Failed to download voice backup files" }
-        Update-Progress $progressBar $form 15
-        
-        $ffp = Join-Path $td "ffmpeg.dll"; 
-        if (-not (Download-FFmpeg $ffp $statusBox $form)) { throw "Failed to download ffmpeg.dll" }
-        Add-Status $statusBox $form "[OK] All files downloaded" "LimeGreen"; Update-Progress $progressBar $form 20
+        Update-Progress $progressBar $form 20
         
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
@@ -800,11 +773,11 @@ $btnFixAll.Add_Click({
                 $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
                 if (-not $vm) { throw "No discord_voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-                $fft = Join-Path $ap "ffmpeg.dll"
-                Add-Status $statusBox $form "  Creating backup..." "Cyan"; Create-VoiceBackup $tvf $fft $ci.Name $av $statusBox $form | Out-Null
+                
+                Add-Status $statusBox $form "  Creating backup..." "Cyan"; Create-VoiceBackup $tvf $ci.Name $av $statusBox $form | Out-Null
                 if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
                 Add-Status $statusBox $form "  Copying module files..." "Cyan"; Copy-Item "$vbp\*" $tvf -Recurse -Force
-                Add-Status $statusBox $form "  Copying ffmpeg.dll..." "Cyan"; Copy-Item $ffp $fft -Force
+                
                 Save-FixState $ci.Name $av; Add-Status $statusBox $form "[OK] $($ci.Name.Trim()) fixed successfully" "LimeGreen"; $fxc++
             } catch { Add-Status $statusBox $form "[X] Failed to fix $($ci.Name.Trim()): $($_.Exception.Message)" "Red"; $fc += $ci.Name }
             $cp += $ppc; Update-Progress $progressBar $form ([int]$cp)

@@ -811,6 +811,15 @@ $btnFixAll.Add_Click({
         }
         
         Remove-OldBackups; Update-Progress $progressBar $form 95
+
+        # Startup shortcut logic
+        if ($chkShortcut.Checked) {
+            Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
+            $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
+            if ($spt) { Create-StartupShortcut $spt $chkSilentStartup.Checked; Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
+            else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
+        } else { Remove-StartupShortcut }
+
         if ($chkAutoStart.Checked -and $fxc -gt 0) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Starting Discord..." "Blue"
             $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe

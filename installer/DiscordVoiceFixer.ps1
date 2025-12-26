@@ -474,7 +474,7 @@ $form.BackColor = $Theme.Background; $form.TopMost = $true
 # Title & Credits
 $titleLabel = New-StyledLabel 20 15 460 35 "Stereo Installer" $Fonts.Title $Theme.TextPrimary "MiddleCenter"
 $form.Controls.Add($titleLabel)
-$creditsLabel = New-StyledLabel 20 52 460 28 "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend | Sentry | Sikimzo" $Fonts.Small $Theme.TextSecondary "MiddleCenter"
+$creditsLabel = New-StyledLabel 20 52 460 28 "Made by`r`nOracle | Shaun | Terrain | Hallow | Ascend | Sentry | Sikimzo | Cypher" $Fonts.Small $Theme.TextSecondary "MiddleCenter"
 $form.Controls.Add($creditsLabel)
 
 # Status Labels

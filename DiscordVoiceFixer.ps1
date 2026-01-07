@@ -324,7 +324,7 @@ function Get-AvailableBackups {
             } catch { continue }
         }
     }
-    return $bks
+    return @($bks)  # FIX: Force array output to prevent single-item unwrapping
 }
 
 function Restore-FromBackup {
@@ -342,7 +342,7 @@ function Restore-FromBackup {
 }
 
 function Remove-OldBackups {
-    $bks = Get-AvailableBackups
+    $bks = @(Get-AvailableBackups)  # FIX: Ensure array
     $byClient = $bks | Group-Object { $_.ClientName }
     foreach ($group in $byClient) {
         $sorted = $group.Group | Sort-Object { $_.BackupDate } -Descending
@@ -594,7 +594,7 @@ $btnCheckUpdate.Add_Click({
 $btnRollback.Add_Click({
     $statusBox.Clear(); $sc = $DiscordClients[$clientCombo.SelectedIndex]
     Add-Status $statusBox $form "Loading available backups..." "Blue"
-    $bks = Get-AvailableBackups
+    $bks = @(Get-AvailableBackups)  # FIX: Ensure array at call site too
     if ($bks.Count -eq 0) { Add-Status $statusBox $form "[X] No backups found" "Red"; [System.Windows.Forms.MessageBox]::Show($form,"No backups available. Run 'Start Fix' first to create a backup.","No Backups","OK","Information"); return }
     
     $rf = New-Object System.Windows.Forms.Form

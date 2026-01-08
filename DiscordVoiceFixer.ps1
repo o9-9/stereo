@@ -51,6 +51,7 @@ $DiscordClients = [ordered]@{
 # 5. URLs & Paths
 $UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
 $VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup"
+$SETTINGS_JSON_URL = "https://raw.githubusercontent.com/ProdHallow/voice-backup/main/settings.json"
 
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"
 $BACKUP_ROOT = "$APP_DATA_ROOT\backups"
@@ -58,10 +59,13 @@ $STATE_FILE = "$APP_DATA_ROOT\state.json"
 $SETTINGS_FILE = "$APP_DATA_ROOT\settings.json"
 $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
 
+# Discord Roaming AppData path for settings.json
+$DISCORD_ROAMING_PATH = "$env:APPDATA\discord"
+
 # 6. Core Logic Functions
 function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
 
-function Get-DefaultSettings { return [PSCustomObject]@{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=0; SilentStartup=$false} }
+function Get-DefaultSettings { return [PSCustomObject]@{CheckForUpdates=$true; AutoApplyUpdates=$true; CreateShortcut=$false; AutoStartDiscord=$true; SelectedClientIndex=0; SilentStartup=$false; FixEqApo=$false} }
 
 function Load-Settings {
     $d = Get-DefaultSettings
@@ -277,6 +281,130 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; return $false }
 }
 
+# EQ APO Fix Function
+$SETTINGS_BACKUP_ROOT = "$APP_DATA_ROOT\settings_backups"
+
+function Apply-EqApoFix {
+    param(
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form,
+        [bool]$SkipConfirmation = $false
+    )
+    
+    try {
+        Add-Status $StatusBox $Form "" "White"
+        Add-Status $StatusBox $Form "=== EQ APO FIX ===" "Blue"
+        
+        # Check if Discord roaming folder exists
+        if (-not (Test-Path $DISCORD_ROAMING_PATH)) {
+            Add-Status $StatusBox $Form "[X] Discord roaming folder not found: $DISCORD_ROAMING_PATH" "Red"
+            Add-Status $StatusBox $Form "    Please ensure Discord has been run at least once." "Yellow"
+            return $false
+        }
+        
+        $targetSettingsPath = Join-Path $DISCORD_ROAMING_PATH "settings.json"
+        
+        # Ask for confirmation unless skipped
+        if (-not $SkipConfirmation) {
+            $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+                $Form,
+                "Replace Discord settings.json to fix EQ APO?",
+                "Confirm EQ APO Fix",
+                "YesNo",
+                "Question"
+            )
+            
+            if ($confirmResult -ne "Yes") {
+                Add-Status $StatusBox $Form "EQ APO fix cancelled by user" "Yellow"
+                return $false
+            }
+        }
+        
+        Add-Status $StatusBox $Form "Applying EQ APO fix..." "Blue"
+        
+        # Backup existing settings.json if it exists
+        if (Test-Path $targetSettingsPath) {
+            EnsureDir $SETTINGS_BACKUP_ROOT
+            $backupTimestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+            $backupFileName = "settings_$backupTimestamp.json"
+            $backupPath = Join-Path $SETTINGS_BACKUP_ROOT $backupFileName
+            
+            Add-Status $StatusBox $Form "  Backing up existing settings.json..." "Cyan"
+            try {
+                Copy-Item $targetSettingsPath $backupPath -Force
+                Add-Status $StatusBox $Form "  [OK] Backup created: $backupFileName" "LimeGreen"
+            } catch {
+                Add-Status $StatusBox $Form "  [!] Warning: Could not create backup: $($_.Exception.Message)" "Orange"
+            }
+        } else {
+            Add-Status $StatusBox $Form "  No existing settings.json found (will create new)" "Yellow"
+        }
+        
+        # Download new settings.json from GitHub
+        Add-Status $StatusBox $Form "  Downloading settings.json from GitHub..." "Cyan"
+        
+        $tempSettingsPath = Join-Path $env:TEMP "discord_settings_$(Get-Random).json"
+        
+        try {
+            Invoke-WebRequest -Uri $SETTINGS_JSON_URL -OutFile $tempSettingsPath -UseBasicParsing -TimeoutSec 30 | Out-Null
+        } catch {
+            if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
+                Add-Status $StatusBox $Form "  [X] settings.json not found in repository" "Red"
+                return $false
+            }
+            throw $_
+        }
+        
+        # Verify the downloaded file is valid JSON
+        Add-Status $StatusBox $Form "  Verifying downloaded file..." "Cyan"
+        try {
+            $jsonContent = Get-Content $tempSettingsPath -Raw | ConvertFrom-Json
+            if ($null -eq $jsonContent) {
+                throw "Downloaded file is empty or invalid"
+            }
+            Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen"
+        } catch {
+            Add-Status $StatusBox $Form "  [X] Downloaded file is not valid JSON: $($_.Exception.Message)" "Red"
+            Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+            return $false
+        }
+        
+        # Delete existing settings.json
+        if (Test-Path $targetSettingsPath) {
+            Add-Status $StatusBox $Form "  Removing old settings.json..." "Cyan"
+            try {
+                Remove-Item $targetSettingsPath -Force
+            } catch {
+                Add-Status $StatusBox $Form "  [X] Could not remove old settings.json: $($_.Exception.Message)" "Red"
+                Add-Status $StatusBox $Form "    Make sure Discord is completely closed." "Yellow"
+                Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+                return $false
+            }
+        }
+        
+        # Copy new settings.json
+        Add-Status $StatusBox $Form "  Installing new settings.json..." "Cyan"
+        try {
+            Copy-Item $tempSettingsPath $targetSettingsPath -Force
+            Add-Status $StatusBox $Form "[OK] EQ APO fix applied successfully!" "LimeGreen"
+        } catch {
+            Add-Status $StatusBox $Form "  [X] Could not install new settings.json: $($_.Exception.Message)" "Red"
+            Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+            return $false
+        }
+        
+        # Cleanup temp file
+        Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+        
+        Add-Status $StatusBox $Form "  Settings replaced at: $targetSettingsPath" "Cyan"
+        return $true
+        
+    } catch {
+        Add-Status $StatusBox $Form "[X] EQ APO fix failed: $($_.Exception.Message)" "Red"
+        return $false
+    }
+}
+
 # 10. Backup/Restore Logic
 function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
 function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
@@ -467,7 +595,7 @@ $settings = Load-Settings
 
 # Main Form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Stereo Installer"; $form.Size = New-Object System.Drawing.Size(520,650)
+$form.Text = "Stereo Installer"; $form.Size = New-Object System.Drawing.Size(520,700)
 $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
 $form.BackColor = $Theme.Background; $form.TopMost = $true
 
@@ -496,9 +624,9 @@ foreach ($c in $DiscordClients.Values) { [void]$clientCombo.Items.Add($c.Name) }
 $clientCombo.SelectedIndex = [Math]::Min($settings.SelectedClientIndex, $clientCombo.Items.Count - 1)
 $clientGroup.Controls.Add($clientCombo)
 
-# Options Group
+# Options Group (increased height to accommodate new checkbox)
 $optionsGroup = New-Object System.Windows.Forms.GroupBox
-$optionsGroup.Location = New-Object System.Drawing.Point(20,190); $optionsGroup.Size = New-Object System.Drawing.Size(460,160)
+$optionsGroup.Location = New-Object System.Drawing.Point(20,190); $optionsGroup.Size = New-Object System.Drawing.Size(460,185)
 $optionsGroup.Text = "Options"; $optionsGroup.ForeColor = $Theme.TextPrimary
 $optionsGroup.BackColor = [System.Drawing.Color]::Transparent; $optionsGroup.Font = $Fonts.Normal
 $form.Controls.Add($optionsGroup)
@@ -511,25 +639,33 @@ $btnSaveScript = New-StyledButton 305 69 135 22 "Save Script" $Fonts.ButtonSmall
 $chkSilentStartup = New-StyledCheckBox 40 91 400 22 "Run silently on startup (no GUI, auto-fix all)" $settings.SilentStartup $Theme.TextPrimary
 $chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; $optionsGroup.Controls.Add($chkSilentStartup)
 $chkAutoStart = New-StyledCheckBox 20 113 420 22 "Automatically start Discord after fixing" $settings.AutoStartDiscord; $optionsGroup.Controls.Add($chkAutoStart)
-$lblScriptStatus = New-StyledLabel 20 137 420 18 "" $Fonts.Small $Theme.TextSecondary "MiddleLeft"; $optionsGroup.Controls.Add($lblScriptStatus)
 
-# Status Box & Progress
+# NEW: EQ APO Fix Checkbox
+$chkFixEqApo = New-StyledCheckBox 20 135 420 22 "Fix EQ APO not working (replaces settings.json)" $settings.FixEqApo $Theme.Warning
+$optionsGroup.Controls.Add($chkFixEqApo)
+
+$lblScriptStatus = New-StyledLabel 20 159 420 18 "" $Fonts.Small $Theme.TextSecondary "MiddleLeft"; $optionsGroup.Controls.Add($lblScriptStatus)
+
+# Status Box & Progress (adjusted Y positions due to larger options group)
 $statusBox = New-Object System.Windows.Forms.RichTextBox
-$statusBox.Location = New-Object System.Drawing.Point(20,360); $statusBox.Size = New-Object System.Drawing.Size(460,130)
+$statusBox.Location = New-Object System.Drawing.Point(20,385); $statusBox.Size = New-Object System.Drawing.Size(460,145)
 $statusBox.ReadOnly = $true; $statusBox.BackColor = $Theme.ControlBg; $statusBox.ForeColor = $Theme.TextPrimary
 $statusBox.Font = $Fonts.Console; $statusBox.DetectUrls = $false; $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(20,500); $progressBar.Size = New-Object System.Drawing.Size(460,22)
+$progressBar.Location = New-Object System.Drawing.Point(20,540); $progressBar.Size = New-Object System.Drawing.Size(460,22)
 $progressBar.Style = "Continuous"; $form.Controls.Add($progressBar)
 
-# Buttons
-$btnStart = New-StyledButton 20 535 100 38 "Start Fix"; $form.Controls.Add($btnStart)
-$btnFixAll = New-StyledButton 125 535 100 38 "Fix All" $Fonts.Button $Theme.Success; $form.Controls.Add($btnFixAll)
-$btnRollback = New-StyledButton 230 535 70 38 "Rollback" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnRollback)
-$btnOpenBackups = New-StyledButton 305 535 70 38 "Backups" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnOpenBackups)
-$btnCheckUpdate = New-StyledButton 380 535 100 38 "Check" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnCheckUpdate)
+# Buttons (adjusted Y positions)
+$btnStart = New-StyledButton 20 575 100 38 "Start Fix"; $form.Controls.Add($btnStart)
+$btnFixAll = New-StyledButton 125 575 100 38 "Fix All" $Fonts.Button $Theme.Success; $form.Controls.Add($btnFixAll)
+$btnRollback = New-StyledButton 230 575 70 38 "Rollback" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnRollback)
+$btnOpenBackups = New-StyledButton 305 575 70 38 "Backups" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnOpenBackups)
+$btnCheckUpdate = New-StyledButton 380 575 100 38 "Check" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnCheckUpdate)
+
+# NEW: EQ APO Fix Button
+$btnFixEqApo = New-StyledButton 20 620 220 32 "Apply EQ APO Fix Only" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnFixEqApo)
 
 # Helper Functions for GUI
 function Update-ScriptStatusLabel {
@@ -550,7 +686,7 @@ function Update-DiscordRunningWarning {
 
 function Save-CurrentSettings {
     $cs = [PSCustomObject]@{CheckForUpdates=$chkUpdate.Checked; AutoApplyUpdates=$chkAutoUpdate.Checked; CreateShortcut=$chkShortcut.Checked
-        AutoStartDiscord=$chkAutoStart.Checked; SilentStartup=$chkSilentStartup.Checked; SelectedClientIndex=$clientCombo.SelectedIndex}
+        AutoStartDiscord=$chkAutoStart.Checked; SilentStartup=$chkSilentStartup.Checked; SelectedClientIndex=$clientCombo.SelectedIndex; FixEqApo=$chkFixEqApo.Checked}
     Save-Settings $cs
 }
 
@@ -559,6 +695,78 @@ $chkUpdate.Add_CheckedChanged({ $chkAutoUpdate.Enabled = $chkUpdate.Checked; $ch
 $chkShortcut.Add_CheckedChanged({ $chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; if (-not $chkShortcut.Checked) { $chkSilentStartup.Checked = $false } })
 $btnSaveScript.Add_Click({ $statusBox.Clear(); $sp = Save-ScriptToAppData $statusBox $form; if ($sp) { Update-ScriptStatusLabel; [System.Windows.Forms.MessageBox]::Show($form,"Script saved to:`n$sp`n`nYou can now create a startup shortcut.","Script Saved","OK","Information") } })
 $btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.exe" $BACKUP_ROOT })
+
+# NEW: EQ APO Fix Only Button Handler
+$btnFixEqApo.Add_Click({
+    $btnFixEqApo.Enabled = $false
+    $statusBox.Clear()
+    $progressBar.Value = 0
+    
+    try {
+        Update-Progress $progressBar $form 10
+        
+        # Check if Discord is running and offer to close it
+        $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
+        $r = Get-Process -Name $dp -EA SilentlyContinue
+        if ($r) {
+            $closeResult = [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "Discord is currently running. It needs to be closed to apply the EQ APO fix.`n`nClose Discord now?",
+                "Discord Running",
+                "YesNo",
+                "Question"
+            )
+            
+            if ($closeResult -eq "Yes") {
+                Add-Status $statusBox $form "Closing Discord processes..." "Blue"
+                $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
+                Stop-DiscordProcesses $allProcs
+                Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+                Start-Sleep -Seconds 1
+            } else {
+                Add-Status $statusBox $form "EQ APO fix cancelled - Discord must be closed" "Yellow"
+                return
+            }
+        }
+        
+        Update-Progress $progressBar $form 30
+        
+        # Apply the EQ APO fix
+        $result = Apply-EqApoFix $statusBox $form $false
+        
+        Update-Progress $progressBar $form 90
+        
+        if ($result) {
+            # Offer to restart Discord if auto-start is enabled
+            if ($chkAutoStart.Checked) {
+                $sc = $DiscordClients[$clientCombo.SelectedIndex]
+                $bp = Get-RealClientPath $sc
+                if ($bp) {
+                    $ap = Find-DiscordAppPath $bp
+                    if ($ap) {
+                        Add-Status $statusBox $form "Starting Discord..." "Blue"
+                        $de = Join-Path $ap $sc.Exe
+                        if (Start-DiscordClient $de) {
+                            Add-Status $statusBox $form "[OK] Discord started" "LimeGreen"
+                        }
+                    }
+                }
+            }
+            
+            Update-Progress $progressBar $form 100
+            Play-CompletionSound $true
+            [System.Windows.Forms.MessageBox]::Show($form, "EQ APO fix applied successfully!", "Success", "OK", "Information")
+        } else {
+            Update-Progress $progressBar $form 100
+            Play-CompletionSound $false
+        }
+    } catch {
+        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
+        Play-CompletionSound $false
+    } finally {
+        $btnFixEqApo.Enabled = $true
+    }
+})
 
 $clientCombo.Add_SelectedIndexChanged({
     $sc = $DiscordClients[$clientCombo.SelectedIndex]; $bp = Get-RealClientPath $sc
@@ -632,7 +840,7 @@ $btnRollback.Add_Click({
 })
 
 $btnStart.Add_Click({
-    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false
+    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false; $btnFixEqApo.Enabled = $false
     $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
     
     try {
@@ -697,9 +905,19 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"; Update-Progress $progressBar $form 70
         
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
-        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 85
+        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 80
         
         Save-FixState $sc.Name $av
+        
+        # NEW: Apply EQ APO fix if checkbox is checked
+        if ($chkFixEqApo.Checked) {
+            Update-Progress $progressBar $form 82
+            $eqApoResult = Apply-EqApoFix $statusBox $form $false
+            if (-not $eqApoResult) {
+                Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange"
+            }
+        }
+        Update-Progress $progressBar $form 85
         
         # Startup shortcut
         if ($chkShortcut.Checked) {
@@ -730,12 +948,12 @@ $btnStart.Add_Click({
         Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
     } finally {
         if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
-        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true
+        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true; $btnFixEqApo.Enabled = $true
     }
 })
 
 $btnFixAll.Add_Click({
-    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false
+    $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false; $btnFixEqApo.Enabled = $false
     $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
     
     try {
@@ -765,7 +983,7 @@ $btnFixAll.Add_Click({
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
         
-        $ppc = 60 / $uc.Count; $cp = 30; $fxc = 0; $fc = @()
+        $ppc = 50 / $uc.Count; $cp = 30; $fxc = 0; $fc = @()
         foreach ($ci in $uc) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== Fixing: $($ci.Name.Trim()) ===" "Blue"
             try {
@@ -783,7 +1001,16 @@ $btnFixAll.Add_Click({
             $cp += $ppc; Update-Progress $progressBar $form ([int]$cp)
         }
         
-        Remove-OldBackups; Update-Progress $progressBar $form 95
+        Remove-OldBackups; Update-Progress $progressBar $form 85
+
+        # NEW: Apply EQ APO fix if checkbox is checked
+        if ($chkFixEqApo.Checked) {
+            $eqApoResult = Apply-EqApoFix $statusBox $form $false
+            if (-not $eqApoResult) {
+                Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange"
+            }
+        }
+        Update-Progress $progressBar $form 90
 
         # Startup shortcut logic
         if ($chkShortcut.Checked) {
@@ -810,7 +1037,7 @@ $btnFixAll.Add_Click({
         Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
     } finally {
         if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
-        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true
+        $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true; $btnFixEqApo.Enabled = $true
     }
 })
 

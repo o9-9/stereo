@@ -55,6 +55,7 @@ $SETTINGS_JSON_URL = "https://raw.githubusercontent.com/ProdHallow/voice-backup/
 
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"
 $BACKUP_ROOT = "$APP_DATA_ROOT\backups"
+$ORIGINAL_BACKUP_ROOT = "$APP_DATA_ROOT\original_discord_modules"
 $STATE_FILE = "$APP_DATA_ROOT\state.json"
 $SETTINGS_FILE = "$APP_DATA_ROOT\settings.json"
 $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
@@ -406,20 +407,117 @@ function Apply-EqApoFix {
 }
 
 # 10. Backup/Restore Logic
-function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
+function Initialize-BackupDirectory { 
+    EnsureDir $BACKUP_ROOT
+    EnsureDir $ORIGINAL_BACKUP_ROOT
+    EnsureDir (Split-Path $STATE_FILE -Parent) 
+}
+
 function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
 function Save-StateData { param([hashtable]$State); $State | ConvertTo-Json -Depth 5 | Out-File $STATE_FILE -Force }
 
+# Get sanitized client key for folder naming
+function Get-SanitizedClientKey { param([string]$ClientName)
+    return $ClientName -replace '\s+','_' -replace '\[|\]','' -replace '-','_'
+}
+
+# Check if original backup exists for a client
+function Test-OriginalBackupExists { param([string]$ClientName)
+    Initialize-BackupDirectory
+    $scn = Get-SanitizedClientKey $ClientName
+    $originalPath = Join-Path $ORIGINAL_BACKUP_ROOT $scn
+    return (Test-Path $originalPath)
+}
+
+# Get the original backup for a client
+function Get-OriginalBackup { param([string]$ClientName)
+    Initialize-BackupDirectory
+    $scn = Get-SanitizedClientKey $ClientName
+    $originalPath = Join-Path $ORIGINAL_BACKUP_ROOT $scn
+    
+    if (Test-Path $originalPath) {
+        $mp = Join-Path $originalPath "metadata.json"
+        if (Test-Path $mp) {
+            try {
+                $m = Get-Content $mp -Raw | ConvertFrom-Json
+                return @{
+                    Path=$originalPath
+                    Name="Original Discord Modules"
+                    ClientName=$m.ClientName
+                    AppVersion=$m.AppVersion
+                    BackupDate=[DateTime]::Parse($m.BackupDate)
+                    IsOriginal=$true
+                    DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
+                }
+            } catch { return $null }
+        }
+    }
+    return $null
+}
+
+# Create original backup (only called once per client, never deleted)
+function Create-OriginalBackup {
+    param([string]$VoiceFolderPath, [string]$ClientName, [string]$AppVersion,
+          [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
+    try {
+        Initialize-BackupDirectory
+        $scn = Get-SanitizedClientKey $ClientName
+        $bp = Join-Path $ORIGINAL_BACKUP_ROOT $scn
+        
+        # If original already exists, skip
+        if (Test-Path $bp) {
+            Add-Status $StatusBox $Form "  Original backup already exists, skipping..." "Yellow"
+            return $bp
+        }
+        
+        try { [void](New-Item $bp -ItemType Directory -Force) } catch { }
+        $vbp = Join-Path $bp "voice_module"
+        
+        Add-Status $StatusBox $Form "  Creating ORIGINAL backup (will never be deleted)..." "Magenta"
+        
+        EnsureDir $vbp
+        if (Test-Path $VoiceFolderPath) {
+            Copy-Item "$VoiceFolderPath\*" $vbp -Recurse -Force
+        }
+        
+        @{
+            ClientName=$ClientName
+            AppVersion=$AppVersion
+            BackupDate=(Get-Date).ToString("o")
+            VoiceModulePath=$VoiceFolderPath
+            IsOriginal=$true
+            Description="Original Discord modules - preserved for reverting to mono audio"
+        } | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
+        
+        Add-Status $StatusBox $Form "[OK] Original backup created: $scn" "Magenta"
+        Add-Status $StatusBox $Form "     This backup will NEVER be deleted automatically" "Cyan"
+        return $bp
+    } catch { 
+        Add-Status $StatusBox $Form "[!] Original backup failed: $($_.Exception.Message)" "Orange"
+        return $null 
+    }
+}
+
+# Create regular timestamped backup
 function Create-VoiceBackup { 
     param([string]$VoiceFolderPath, [string]$ClientName, [string]$AppVersion,
           [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         Initialize-BackupDirectory
+        
+        # First, check if we need to create an original backup
+        if (-not (Test-OriginalBackupExists $ClientName)) {
+            Create-OriginalBackup $VoiceFolderPath $ClientName $AppVersion $StatusBox $Form | Out-Null
+        }
+        
+        # Now create the regular timestamped backup
         $ts = Get-Date -Format "yyyy-MM-dd_HHmmss"
-        $scn = $ClientName -replace '\s+','_' -replace '\[|\]',''
+        $scn = Get-SanitizedClientKey $ClientName
         $bn = "${scn}_${AppVersion}_${ts}"
-        $bp = Join-Path $BACKUP_ROOT $bn; try { [void](New-Item $bp -ItemType Directory -Force) } catch { }
+        $bp = Join-Path $BACKUP_ROOT $bn
+        try { [void](New-Item $bp -ItemType Directory -Force) } catch { }
         $vbp = Join-Path $bp "voice_module"
+        
         Add-Status $StatusBox $Form "  Backing up voice module..." "Cyan"
         
         EnsureDir $vbp
@@ -427,14 +525,47 @@ function Create-VoiceBackup {
             Copy-Item "$VoiceFolderPath\*" $vbp -Recurse -Force
         }
         
-        @{ClientName=$ClientName; AppVersion=$AppVersion; BackupDate=(Get-Date).ToString("o"); VoiceModulePath=$VoiceFolderPath} | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
-        Add-Status $StatusBox $Form "[OK] Backup created: $bn" "LimeGreen"; return $bp
-    } catch { Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"; return $null }
+        @{
+            ClientName=$ClientName
+            AppVersion=$AppVersion
+            BackupDate=(Get-Date).ToString("o")
+            VoiceModulePath=$VoiceFolderPath
+            IsOriginal=$false
+        } | ConvertTo-Json | Out-File (Join-Path $bp "metadata.json") -Force
+        
+        Add-Status $StatusBox $Form "[OK] Backup created: $bn" "LimeGreen"
+        return $bp
+    } catch { 
+        Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"
+        return $null 
+    }
 }
 
 function Get-AvailableBackups {
     Initialize-BackupDirectory
     $bks = [System.Collections.ArrayList]@()
+    
+    # First, add original backups (from original_discord_modules folder)
+    $originals = gci $ORIGINAL_BACKUP_ROOT -Directory -EA SilentlyContinue
+    foreach ($f in $originals) {
+        $mp = Join-Path $f.FullName "metadata.json"
+        if (Test-Path $mp) {
+            try {
+                $m = Get-Content $mp -Raw | ConvertFrom-Json
+                [void]$bks.Add(@{
+                    Path=$f.FullName
+                    Name=$f.Name
+                    ClientName=$m.ClientName
+                    AppVersion=$m.AppVersion
+                    BackupDate=[DateTime]::Parse($m.BackupDate)
+                    IsOriginal=$true
+                    DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
+                })
+            } catch { continue }
+        }
+    }
+    
+    # Then add regular backups (sorted by date, newest first)
     $bfs = gci $BACKUP_ROOT -Directory -EA SilentlyContinue | Sort-Object Name -Descending
     foreach ($f in $bfs) {
         $mp = Join-Path $f.FullName "metadata.json"
@@ -442,11 +573,12 @@ function Get-AvailableBackups {
             try {
                 $m = Get-Content $mp -Raw | ConvertFrom-Json
                 [void]$bks.Add(@{
-                    Path=$f.FullName; 
-                    Name=$f.Name; 
-                    ClientName=$m.ClientName; 
-                    AppVersion=$m.AppVersion;
-                    BackupDate=[DateTime]::Parse($m.BackupDate);
+                    Path=$f.FullName
+                    Name=$f.Name
+                    ClientName=$m.ClientName
+                    AppVersion=$m.AppVersion
+                    BackupDate=[DateTime]::Parse($m.BackupDate)
+                    IsOriginal=$false
                     DisplayName="$($m.ClientName) v$($m.AppVersion) - $(([DateTime]::Parse($m.BackupDate)).ToString('MMM dd, yyyy HH:mm'))"
                 })
             } catch { continue }
@@ -461,7 +593,11 @@ function Restore-FromBackup {
     try {
         $vbp = Join-Path $Backup.Path "voice_module"
         if (Test-Path $vbp) {
-            Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
+            if ($Backup.IsOriginal) {
+                Add-Status $StatusBox $Form "  Restoring ORIGINAL voice module (reverting to mono)..." "Magenta"
+            } else {
+                Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
+            }
             if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $TargetVoicePath }
             Copy-Item "$vbp\*" $TargetVoicePath -Recurse -Force
         }
@@ -470,11 +606,34 @@ function Restore-FromBackup {
 }
 
 function Remove-OldBackups {
-    $bks = @(Get-AvailableBackups)  # FIX: Ensure array
-    $byClient = $bks | Group-Object { $_.ClientName }
-    foreach ($group in $byClient) {
-        $sorted = $group.Group | Sort-Object { $_.BackupDate } -Descending
-        $sorted | Select-Object -Skip 1 | % { Remove-Item $_.Path -Recurse -Force -EA SilentlyContinue }
+    # Only remove old backups from BACKUP_ROOT, NEVER touch ORIGINAL_BACKUP_ROOT
+    $bfs = gci $BACKUP_ROOT -Directory -EA SilentlyContinue
+    
+    # Group by client and keep only the latest for each
+    $byClient = @{}
+    foreach ($f in $bfs) {
+        $mp = Join-Path $f.FullName "metadata.json"
+        if (Test-Path $mp) {
+            try {
+                $m = Get-Content $mp -Raw | ConvertFrom-Json
+                $clientKey = $m.ClientName
+                if (-not $byClient.ContainsKey($clientKey)) {
+                    $byClient[$clientKey] = [System.Collections.ArrayList]@()
+                }
+                [void]$byClient[$clientKey].Add(@{
+                    Path = $f.FullName
+                    BackupDate = [DateTime]::Parse($m.BackupDate)
+                })
+            } catch { continue }
+        }
+    }
+    
+    # For each client, remove all but the newest backup
+    foreach ($clientKey in $byClient.Keys) {
+        $backups = $byClient[$clientKey] | Sort-Object { $_.BackupDate } -Descending
+        $backups | Select-Object -Skip 1 | ForEach-Object { 
+            Remove-Item $_.Path -Recurse -Force -EA SilentlyContinue 
+        }
     }
 }
 
@@ -694,7 +853,7 @@ function Save-CurrentSettings {
 $chkUpdate.Add_CheckedChanged({ $chkAutoUpdate.Enabled = $chkUpdate.Checked; $chkAutoUpdate.Visible = $chkUpdate.Checked; if (-not $chkUpdate.Checked) { $chkAutoUpdate.Checked = $false } })
 $chkShortcut.Add_CheckedChanged({ $chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; if (-not $chkShortcut.Checked) { $chkSilentStartup.Checked = $false } })
 $btnSaveScript.Add_Click({ $statusBox.Clear(); $sp = Save-ScriptToAppData $statusBox $form; if ($sp) { Update-ScriptStatusLabel; [System.Windows.Forms.MessageBox]::Show($form,"Script saved to:`n$sp`n`nYou can now create a startup shortcut.","Script Saved","OK","Information") } })
-$btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.exe" $BACKUP_ROOT })
+$btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.exe" $APP_DATA_ROOT })
 
 # NEW: EQ APO Fix Only Button Handler
 $btnFixEqApo.Add_Click({
@@ -797,6 +956,18 @@ $btnCheckUpdate.Add_Click({
         Add-Status $statusBox $form "    Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
         $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
     } else { Add-Status $statusBox $form "[!] No previous fix recorded for this client" "Yellow"; Add-Status $statusBox $form "    Run 'Start Fix' to apply the fix." "Cyan"; $updateStatusLabel.Text = "" }
+    
+    # Show original backup status
+    if (Test-OriginalBackupExists $sc.Name) {
+        $orig = Get-OriginalBackup $sc.Name
+        if ($orig) {
+            Add-Status $statusBox $form "" "White"
+            Add-Status $statusBox $form "[ORIGINAL BACKUP] Preserved from: $($orig.BackupDate.ToString('MMM dd, yyyy HH:mm'))" "Magenta"
+        }
+    } else {
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "[INFO] No original backup yet - will be created on first fix" "Yellow"
+    }
 })
 
 $btnRollback.Add_Click({
@@ -806,15 +977,19 @@ $btnRollback.Add_Click({
     if ($bks.Count -eq 0) { Add-Status $statusBox $form "[X] No backups found" "Red"; [System.Windows.Forms.MessageBox]::Show($form,"No backups available. Run 'Start Fix' first to create a backup.","No Backups","OK","Information"); return }
     
     $rf = New-Object System.Windows.Forms.Form
-    $rf.Text = "Select Backup to Restore"; $rf.Size = New-Object System.Drawing.Size(450,300); $rf.StartPosition = "CenterParent"
+    $rf.Text = "Select Backup to Restore"; $rf.Size = New-Object System.Drawing.Size(500,350); $rf.StartPosition = "CenterParent"
     $rf.FormBorderStyle = "FixedDialog"; $rf.MaximizeBox = $false; $rf.MinimizeBox = $false; $rf.BackColor = $Theme.Background; $rf.TopMost = $true
     
+    # Info label
+    $infoLabel = New-StyledLabel 20 10 445 40 "[ORIGINAL] backups are preserved forever and let you revert to mono audio.`nRegular backups are rotated (1 kept per client)." $Fonts.Small $Theme.TextSecondary "TopLeft"
+    $rf.Controls.Add($infoLabel)
+    
     $lb = New-Object System.Windows.Forms.ListBox
-    $lb.Location = New-Object System.Drawing.Point(20,20); $lb.Size = New-Object System.Drawing.Size(395,180)
+    $lb.Location = New-Object System.Drawing.Point(20,55); $lb.Size = New-Object System.Drawing.Size(445,180)
     $lb.BackColor = $Theme.ControlBg; $lb.ForeColor = $Theme.TextPrimary; $lb.Font = $Fonts.Normal
     foreach ($b in $bks) { [void]$lb.Items.Add($b.DisplayName) }; $lb.SelectedIndex = 0; $rf.Controls.Add($lb)
     
-    $br = New-StyledButton 120 210 100 35 "Restore"; $bc = New-StyledButton 230 210 100 35 "Cancel" $Fonts.Button $Theme.Secondary
+    $br = New-StyledButton 145 250 100 35 "Restore"; $bc = New-StyledButton 255 250 100 35 "Cancel" $Fonts.Button $Theme.Secondary
     $rf.Controls.Add($br); $rf.Controls.Add($bc)
     $bc.Add_Click({ $rf.DialogResult = "Cancel"; $rf.Close() }); $br.Add_Click({ $rf.DialogResult = "OK"; $rf.Close() })
     
@@ -822,6 +997,22 @@ $btnRollback.Add_Click({
     if ($res -eq "OK" -and $lb.SelectedIndex -ge 0) {
         $sb = $bks[$lb.SelectedIndex]
         if (-not $sb -or -not $sb.Path) { Add-Status $statusBox $form "[X] Invalid backup selection" "Red"; return }
+        
+        # Special warning for original backup
+        if ($sb.IsOriginal) {
+            $confirmOrig = [System.Windows.Forms.MessageBox]::Show(
+                $form,
+                "You are about to restore the ORIGINAL backup.`n`nThis will revert Discord to MONO audio (pre-stereo fix).`n`nAre you sure you want to continue?",
+                "Restore Original (Mono)?",
+                "YesNo",
+                "Warning"
+            )
+            if ($confirmOrig -ne "Yes") {
+                Add-Status $statusBox $form "Restore cancelled by user" "Yellow"
+                return
+            }
+        }
+        
         Add-Status $statusBox $form "Starting rollback..." "Blue"; Add-Status $statusBox $form "  Selected: $($sb.DisplayName)" "Cyan"
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"; Stop-DiscordProcesses $sc.Processes
         $bp = Get-RealClientPath $sc; if (-not $bp) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
@@ -832,7 +1023,11 @@ $btnRollback.Add_Click({
         
         $suc = Restore-FromBackup $sb $tvf $statusBox $form
         if ($suc) {
-            Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen"
+            if ($sb.IsOriginal) {
+                Add-Status $statusBox $form "[OK] Restored to ORIGINAL (mono audio)" "Magenta"
+            } else {
+                Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen"
+            }
             if ($chkAutoStart.Checked) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; Start-DiscordClient $de; Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
             Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Rollback completed successfully!","Success","OK","Information")
         }
@@ -896,9 +1091,11 @@ $btnStart.Add_Click({
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
         Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
         
-        # Backup & Apply fix
+        # Backup & Apply fix (this will automatically create original backup on first run)
         Add-Status $statusBox $form "Creating backup of current files..." "Blue"
-        Create-VoiceBackup $tvf $sc.Name $av $statusBox $form | Out-Null; Remove-OldBackups; Update-Progress $progressBar $form 60
+        Create-VoiceBackup $tvf $sc.Name $av $statusBox $form | Out-Null
+        Remove-OldBackups
+        Update-Progress $progressBar $form 60
         
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
         if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
@@ -941,7 +1138,7 @@ $btnStart.Add_Click({
         $updateStatusLabel.Text = "Last fixed: $(Get-Date -Format 'MMM dd, yyyy HH:mm') (v$av)"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
         Play-CompletionSound $true; Save-CurrentSettings
-        [System.Windows.Forms.MessageBox]::Show($form,"Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.","Success","OK","Information")
+        [System.Windows.Forms.MessageBox]::Show($form,"Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.`nYour ORIGINAL modules are preserved permanently.","Success","OK","Information")
         $form.Close()
     } catch {
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
@@ -992,7 +1189,8 @@ $btnFixAll.Add_Click({
                 if (-not $vm) { throw "No discord_voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
                 
-                Add-Status $statusBox $form "  Creating backup..." "Cyan"; Create-VoiceBackup $tvf $ci.Name $av $statusBox $form | Out-Null
+                Add-Status $statusBox $form "  Creating backup..." "Cyan"
+                Create-VoiceBackup $tvf $ci.Name $av $statusBox $form | Out-Null
                 if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
                 Add-Status $statusBox $form "  Copying module files..." "Cyan"; Copy-Item "$vbp\*" $tvf -Recurse -Force
                 
@@ -1031,7 +1229,7 @@ $btnFixAll.Add_Click({
         Add-Status $statusBox $form "Fixed: $fxc / $($uc.Count) clients" "Cyan"; Save-CurrentSettings
         
         if ($fc.Count -gt 0) { Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"Fixed $fxc of $($uc.Count) clients.`n`nFailed: $($fc -join ', ')","Completed with Errors","OK","Warning") }
-        else { Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Successfully fixed all $fxc Discord client(s)!","Success","OK","Information") }
+        else { Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Successfully fixed all $fxc Discord client(s)!`n`nOriginal modules preserved for each client.","Success","OK","Information") }
     } catch {
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
         Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")

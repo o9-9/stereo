@@ -150,20 +150,68 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
 }
 
 # FIX #9: Fixed $_ reference in catch block
-function Find-DiscordAppPath { param([string]$BasePath)
+# IMPROVED: Better diagnostics for why Discord wasn't found
+function Find-DiscordAppPath { 
+    param([string]$BasePath, [switch]$ReturnDiagnostics)
+    
     $af = Get-ChildItem $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue | 
         Sort-Object { 
             $folder = $_
-            try { if ($folder.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { $folder.Name } } catch { $folder.Name }
+            try { if ($folder.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { $folder.Name } } 
+            catch { $folder.Name }
         } -Descending
+    
+    # Diagnostic info
+    $diag = @{
+        BasePath = $BasePath
+        AppFoldersFound = @()
+        ModulesFolderExists = $false
+        VoiceModuleExists = $false
+        LatestAppFolder = $null
+        LatestAppVersion = $null
+        ModulesPath = $null
+        VoiceModulePath = $null
+        Error = $null
+    }
+    
+    if (-not $af -or $af.Count -eq 0) {
+        $diag.Error = "NoAppFolders"
+        if ($ReturnDiagnostics) { return $diag }
+        return $null
+    }
+    
+    $diag.AppFoldersFound = @($af | ForEach-Object { $_.Name })
+    $diag.LatestAppFolder = $af[0].FullName
+    if ($af[0].Name -match "app-([\d\.]+)") { 
+        $diag.LatestAppVersion = $matches[1] 
+    } else {
+        $diag.LatestAppVersion = $af[0].Name  # Fallback to folder name if no version match
+    }
     
     foreach ($f in $af) {
         $mp = Join-Path $f.FullName "modules"
         if (Test-Path $mp) { 
+            $diag.ModulesFolderExists = $true
+            $diag.ModulesPath = $mp
+            
             $vm = Get-ChildItem $mp -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue
-            if ($vm) { return $f.FullName } 
+            if ($vm) { 
+                $diag.VoiceModuleExists = $true
+                $diag.VoiceModulePath = $vm[0].FullName
+                if ($ReturnDiagnostics) { return $diag }
+                return $f.FullName 
+            }
         }
     }
+    
+    # Determine the specific error
+    if (-not $diag.ModulesFolderExists) {
+        $diag.Error = "NoModulesFolder"
+    } elseif (-not $diag.VoiceModuleExists) {
+        $diag.Error = "NoVoiceModule"
+    }
+    
+    if ($ReturnDiagnostics) { return $diag }
     return $null
 }
 
@@ -174,6 +222,184 @@ function Get-DiscordAppVersion { param([string]$AppPath)
         if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
     } catch {}
     return "Unknown"
+}
+
+# Discord Reinstall Function - handles corrupted/old Discord installations
+$DISCORD_SETUP_URL = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=stable&platform=win&arch=x64"
+
+function Reinstall-DiscordClient {
+    param(
+        [string]$ClientPath,
+        [hashtable]$ClientInfo,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form,
+        [switch]$SkipConfirmation
+    )
+    
+    try {
+        $clientName = $ClientInfo.Name
+        $processes = $ClientInfo.Processes
+        
+        # Only support official Discord clients for reinstall
+        if ($clientName -notmatch "\[Official\]") {
+            Add-Status $StatusBox $Form "[X] Automatic reinstall only supported for official Discord clients" "Red"
+            Add-Status $StatusBox $Form "    Please manually reinstall $clientName" "Yellow"
+            return $false
+        }
+        
+        # Determine which Discord variant we're reinstalling
+        $discordVariant = "stable"
+        $setupUrl = $DISCORD_SETUP_URL
+        if ($clientName -match "Canary") {
+            $discordVariant = "canary"
+            $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=canary&platform=win&arch=x64"
+        } elseif ($clientName -match "PTB") {
+            $discordVariant = "ptb"
+            $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=ptb&platform=win&arch=x64"
+        } elseif ($clientName -match "Development") {
+            $discordVariant = "development"
+            $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=development&platform=win&arch=x64"
+        }
+        
+        Add-Status $StatusBox $Form "" "White"
+        Add-Status $StatusBox $Form "=== DISCORD REINSTALL ($discordVariant) ===" "Magenta"
+        Add-Status $StatusBox $Form "Your Discord installation is missing the modules folder." "Yellow"
+        Add-Status $StatusBox $Form "This usually means Discord is corrupted or very outdated." "Yellow"
+        
+        # Ask for confirmation unless skipped
+        if (-not $SkipConfirmation) {
+            $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+                $Form,
+                "Your Discord installation appears to be corrupted or outdated (missing modules folder).`n`nWould you like to automatically reinstall Discord?`n`nThis will:`n1. Close Discord completely`n2. Delete the corrupted app folder`n3. Download and run the latest Discord installer`n4. Apply the stereo fix after installation`n`nYour Discord settings and login will be preserved.",
+                "Reinstall Discord?",
+                "YesNo",
+                "Question"
+            )
+            
+            if ($confirmResult -ne "Yes") {
+                Add-Status $StatusBox $Form "Reinstall cancelled by user" "Yellow"
+                return $false
+            }
+        }
+        
+        # Step 1: Kill all Discord processes
+        Add-Status $StatusBox $Form "Step 1/4: Closing all Discord processes..." "Blue"
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
+        $stopResult = Stop-DiscordProcesses $allProcs
+        if (-not $stopResult) {
+            # Force kill with taskkill as backup
+            Start-Process "taskkill" -ArgumentList "/F","/IM","Discord*.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+            Start-Process "taskkill" -ArgumentList "/F","/IM","Update.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+        Add-Status $StatusBox $Form "[OK] Discord processes terminated" "LimeGreen"
+        
+        # Step 2: Delete the app-* folders (preserve user data in %APPDATA%\discord)
+        Add-Status $StatusBox $Form "Step 2/4: Removing corrupted Discord files..." "Blue"
+        $appFolders = Get-ChildItem $ClientPath -Filter "app-*" -Directory -ErrorAction SilentlyContinue
+        $deletedCount = 0
+        foreach ($folder in $appFolders) {
+            try {
+                Add-Status $StatusBox $Form "  Deleting: $($folder.Name)" "Cyan"
+                Remove-Item $folder.FullName -Recurse -Force -ErrorAction Stop
+                $deletedCount++
+            } catch {
+                Add-Status $StatusBox $Form "  [!] Could not delete $($folder.Name): $($_.Exception.Message)" "Orange"
+            }
+        }
+        
+        # Also delete Update.exe if it exists (it will be re-downloaded)
+        $updateExe = Join-Path $ClientPath "Update.exe"
+        if (Test-Path $updateExe) {
+            try {
+                Remove-Item $updateExe -Force -ErrorAction Stop
+                Add-Status $StatusBox $Form "  Deleted: Update.exe" "Cyan"
+            } catch {
+                Add-Status $StatusBox $Form "  [!] Could not delete Update.exe" "Orange"
+            }
+        }
+        
+        Add-Status $StatusBox $Form "[OK] Removed $deletedCount app folder(s)" "LimeGreen"
+        
+        # Step 3: Download and run Discord installer
+        Add-Status $StatusBox $Form "Step 3/4: Downloading Discord installer..." "Blue"
+        $installerPath = Join-Path $env:TEMP "DiscordSetup_$(Get-Random).exe"
+        
+        try {
+            Add-Status $StatusBox $Form "  URL: $setupUrl" "Cyan"
+            Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+            
+            if (-not (Test-Path $installerPath)) {
+                throw "Installer download failed - file not created"
+            }
+            
+            $installerSize = (Get-Item $installerPath).Length / 1MB
+            if ($installerSize -lt 1) {
+                throw "Installer file is too small ($([math]::Round($installerSize, 2)) MB) - download may have failed"
+            }
+            
+            Add-Status $StatusBox $Form "[OK] Downloaded installer ($([math]::Round($installerSize, 1)) MB)" "LimeGreen"
+        } catch {
+            Add-Status $StatusBox $Form "[X] Failed to download Discord installer: $($_.Exception.Message)" "Red"
+            Add-Status $StatusBox $Form "    Please download Discord manually from https://discord.com/download" "Yellow"
+            return $false
+        }
+        
+        Add-Status $StatusBox $Form "Step 4/4: Running Discord installer..." "Blue"
+        Add-Status $StatusBox $Form "  Please wait for Discord to install and start..." "Yellow"
+        Add-Status $StatusBox $Form "  (This may take 1-2 minutes)" "Yellow"
+        
+        try {
+            # Run the installer - Discord installer runs silently and starts Discord automatically
+            Start-Process $installerPath -Wait
+            Add-Status $StatusBox $Form "[OK] Discord installer completed" "LimeGreen"
+        } catch {
+            Add-Status $StatusBox $Form "[!] Installer may have encountered an issue: $($_.Exception.Message)" "Orange"
+        }
+        
+        # Clean up installer
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+        
+        # Wait for Discord to fully start and download modules
+        Add-Status $StatusBox $Form "" "White"
+        Add-Status $StatusBox $Form "Waiting for Discord to initialize..." "Blue"
+        Add-Status $StatusBox $Form "  Discord needs to download voice modules (this may take 30-60 seconds)" "Cyan"
+        
+        $maxWaitSeconds = 90
+        $waitedSeconds = 0
+        $voiceModuleFound = $false
+        
+        while ($waitedSeconds -lt $maxWaitSeconds) {
+            Start-Sleep -Seconds 5
+            $waitedSeconds += 5
+            
+            # Check if voice module now exists
+            $newDiag = Find-DiscordAppPath $ClientPath -ReturnDiagnostics
+            if ($newDiag.VoiceModuleExists) {
+                $voiceModuleFound = $true
+                Add-Status $StatusBox $Form "[OK] Voice module detected!" "LimeGreen"
+                break
+            }
+            
+            # Show progress
+            $progressDots = "." * (($waitedSeconds / 5) % 4 + 1)
+            Add-Status $StatusBox $Form "  Waiting for modules$progressDots ($waitedSeconds/$maxWaitSeconds sec)" "Cyan"
+        }
+        
+        if (-not $voiceModuleFound) {
+            Add-Status $StatusBox $Form "[!] Voice module not detected after waiting" "Orange"
+            Add-Status $StatusBox $Form "    Try joining a voice channel in Discord, then click 'Fix All'" "Yellow"
+            return $false
+        }
+        
+        Add-Status $StatusBox $Form "" "White"
+        Add-Status $StatusBox $Form "[OK] Discord reinstallation completed successfully!" "LimeGreen"
+        return $true
+        
+    } catch {
+        Add-Status $StatusBox $Form "[X] Reinstall failed: $($_.Exception.Message)" "Red"
+        return $false
+    }
 }
 
 function Start-DiscordClient { param([string]$ExePath)
@@ -642,8 +868,11 @@ function Restore-FromBackup {
             }
             if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $TargetVoicePath }
             Copy-Item "$vbp\*" $TargetVoicePath -Recurse -Force
+            return $true
+        } else {
+            Add-Status $StatusBox $Form "[X] Backup voice_module folder not found: $vbp" "Red"
+            return $false
         }
-        return $true
     } catch { Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"; return $false }
 }
 
@@ -742,6 +971,95 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
 # FIX #4 & #5: Added EQ APO fix and startup shortcut support to silent mode
 if ($Silent -or $CheckOnly) {
     $ic = Get-InstalledClients
+    
+    # Check for corrupted installations (folder exists but no valid app/modules)
+    $corruptedClients = @()
+    foreach ($k in $DiscordClients.Keys) {
+        $c = $DiscordClients[$k]
+        if (Test-Path $c.Path) {
+            $diag = Find-DiscordAppPath $c.Path -ReturnDiagnostics
+            if ($diag.Error -eq "NoModulesFolder" -and $c.Name -match "\[Official\]") {
+                $corruptedClients += @{
+                    Key = $k
+                    Client = $c
+                    Path = $c.Path
+                    Diag = $diag
+                }
+            }
+        }
+    }
+    
+    # Handle corrupted installations in silent mode
+    if ($corruptedClients.Count -gt 0 -and $ic.Count -eq 0) {
+        Write-Host "Detected $($corruptedClients.Count) corrupted Discord installation(s)"
+        
+        foreach ($corrupt in $corruptedClients) {
+            Write-Host "Attempting to repair: $($corrupt.Client.Name.Trim())"
+            
+            # Silent reinstall (no GUI confirmation)
+            $reinstallSuccess = $false
+            try {
+                # Kill all Discord processes
+                $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Update")
+                Stop-DiscordProcesses $allProcs | Out-Null
+                Start-Process "taskkill" -ArgumentList "/F","/IM","Discord*.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+                
+                # Delete corrupted app folders
+                $appFolders = Get-ChildItem $corrupt.Path -Filter "app-*" -Directory -ErrorAction SilentlyContinue
+                foreach ($folder in $appFolders) {
+                    Remove-Item $folder.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                $updateExe = Join-Path $corrupt.Path "Update.exe"
+                if (Test-Path $updateExe) { Remove-Item $updateExe -Force -ErrorAction SilentlyContinue }
+                
+                # Download and run installer
+                $discordVariant = "stable"
+                $setupUrl = $DISCORD_SETUP_URL
+                if ($corrupt.Client.Name -match "Canary") { 
+                    $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=canary&platform=win&arch=x64" 
+                }
+                elseif ($corrupt.Client.Name -match "PTB") { 
+                    $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=ptb&platform=win&arch=x64" 
+                }
+                elseif ($corrupt.Client.Name -match "Development") { 
+                    $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=development&platform=win&arch=x64" 
+                }
+                
+                $installerPath = Join-Path $env:TEMP "DiscordSetup_$(Get-Random).exe"
+                Write-Host "  Downloading Discord installer..."
+                Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+                
+                Write-Host "  Running installer..."
+                Start-Process $installerPath -Wait
+                Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+                
+                # Wait for modules
+                Write-Host "  Waiting for Discord to initialize..."
+                $waitedSeconds = 0
+                while ($waitedSeconds -lt 90) {
+                    Start-Sleep -Seconds 5
+                    $waitedSeconds += 5
+                    $newDiag = Find-DiscordAppPath $corrupt.Path -ReturnDiagnostics
+                    if ($newDiag.VoiceModuleExists) {
+                        Write-Host "  [OK] Discord repaired successfully"
+                        $reinstallSuccess = $true
+                        break
+                    }
+                }
+                
+                if (-not $reinstallSuccess) {
+                    Write-Host "  [!] Voice module not detected after reinstall"
+                }
+            } catch {
+                Write-Host "  [FAIL] Repair failed: $($_.Exception.Message)"
+            }
+        }
+        
+        # Re-scan for installed clients after repair
+        $ic = Get-InstalledClients
+    }
+    
     if ($ic.Count -eq 0) { Write-Host "No Discord clients found."; exit 1 }
     
     if ($CheckOnly) {
@@ -1021,8 +1339,60 @@ $btnCheckUpdate.Add_Click({
     $bp = Get-RealClientPath $sc
     if (-not $bp) { Add-Status $statusBox $form "[X] Discord client not found (checked Default, Process, and Shortcuts)" "Red"; Add-Status $statusBox $form "    Try opening Discord first so we can detect the path." "Yellow"; return }
     Add-Status $statusBox $form "Found installation at: $bp" "Cyan"
-    $ap = Find-DiscordAppPath $bp; if (-not $ap) { Add-Status $statusBox $form "[X] No Discord installation found" "Red"; return }
+    
+    # Use diagnostic mode to get detailed info
+    $diag = Find-DiscordAppPath $bp -ReturnDiagnostics
+    
+    if ($diag.Error) {
+        switch ($diag.Error) {
+            "NoAppFolders" {
+                Add-Status $statusBox $form "[X] No Discord app folders found (app-*)" "Red"
+                Add-Status $statusBox $form "    Discord may not be fully installed." "Yellow"
+                Add-Status $statusBox $form "    Try running Discord once to complete installation." "Yellow"
+            }
+            "NoModulesFolder" {
+                Add-Status $statusBox $form "[X] No 'modules' folder found in Discord" "Red"
+                Add-Status $statusBox $form "    Found app folder: $($diag.LatestAppVersion)" "Cyan"
+                Add-Status $statusBox $form "    Your Discord version is corrupted or severely outdated." "Yellow"
+                Add-Status $statusBox $form "" "White"
+                
+                # Offer automatic reinstall for official clients
+                if ($sc.Name -match "\[Official\]") {
+                    Add-Status $statusBox $form "[?] Would you like to automatically reinstall Discord?" "Magenta"
+                    
+                    $reinstallResult = Reinstall-DiscordClient -ClientPath $bp -ClientInfo $sc -StatusBox $statusBox -Form $form
+                    
+                    if ($reinstallResult) {
+                        Add-Status $statusBox $form "" "White"
+                        Add-Status $statusBox $form "Discord reinstalled! Now applying the stereo fix..." "Blue"
+                        
+                        # Trigger Fix All automatically
+                        $form.Refresh()
+                        Start-Sleep -Seconds 2
+                        $btnFixAll.PerformClick()
+                    }
+                } else {
+                    Add-Status $statusBox $form "    Please manually reinstall $($sc.Name.Trim())" "Yellow"
+                }
+            }
+            "NoVoiceModule" {
+                Add-Status $statusBox $form "[X] No 'discord_voice' module found" "Red"
+                Add-Status $statusBox $form "    Found app folder: $($diag.LatestAppVersion)" "Cyan"
+                Add-Status $statusBox $form "    Modules path: $($diag.ModulesPath)" "Cyan"
+                Add-Status $statusBox $form "    The voice module may not have been downloaded yet." "Yellow"
+                Add-Status $statusBox $form "    Try: 1) Join a voice channel in Discord  2) Wait 30 seconds  3) Check again" "Yellow"
+            }
+            default {
+                Add-Status $statusBox $form "[X] Unknown error finding Discord installation" "Red"
+            }
+        }
+        return
+    }
+    
+    $ap = $diag.LatestAppFolder
     $cv = Get-DiscordAppVersion $ap; Add-Status $statusBox $form "Current version: $cv" "Cyan"
+    Add-Status $statusBox $form "Voice module: $($diag.VoiceModulePath | Split-Path -Leaf)" "Cyan"
+    
     $uc = Check-DiscordUpdated $bp $sc.Name
     if ($uc -and $uc.Updated) {
         Add-Status $statusBox $form "[!] Discord has been updated!" "Yellow"
@@ -1134,16 +1504,22 @@ $btnStart.Add_Click({
                 else {
                     $uf = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
                     Invoke-WebRequest -Uri $UPDATE_URL -OutFile $uf -UseBasicParsing -TimeoutSec 10 | Out-Null
-                    $uc = (Get-Content $uf -Raw) -replace "`r`n","`n" -replace "`r","`n"; $cc = (Get-Content $cs -Raw) -replace "`r`n","`n" -replace "`r","`n"
-                    $uc = $uc.Trim(); $cc = $cc.Trim()
-                    if ($uc -ne $cc) {
-                        Add-Status $statusBox $form "New update found!" "Yellow"
-                        if ($chkAutoUpdate.Checked) {
-                            Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
-                            Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
-                            Start-Sleep -Seconds 3; Apply-ScriptUpdate $uf $cs; $form.Close(); return
-                        } else { Add-Status $statusBox $form "Update downloaded to: $uf" "Orange"; Add-Status $statusBox $form "Please manually replace the script file to update." "Orange" }
-                    } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -ErrorAction SilentlyContinue }
+                    $ucontent = (Get-Content $uf -Raw) -replace "`r`n","`n" -replace "`r","`n"
+                    $ccontent = (Get-Content $cs -Raw) -replace "`r`n","`n" -replace "`r","`n"
+                    if ($ucontent -and $ccontent) {
+                        $ucontent = $ucontent.Trim(); $ccontent = $ccontent.Trim()
+                        if ($ucontent -ne $ccontent) {
+                            Add-Status $statusBox $form "New update found!" "Yellow"
+                            if ($chkAutoUpdate.Checked) {
+                                Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
+                                Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
+                                Start-Sleep -Seconds 3; Apply-ScriptUpdate $uf $cs; $form.Close(); return
+                            } else { Add-Status $statusBox $form "Update downloaded to: $uf" "Orange"; Add-Status $statusBox $form "Please manually replace the script file to update." "Orange" }
+                        } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -ErrorAction SilentlyContinue }
+                    } else {
+                        Add-Status $statusBox $form "[!] Could not read script files for comparison" "Orange"
+                        Remove-Item $uf -ErrorAction SilentlyContinue
+                    }
                 }
             } catch { Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange" }
         }
@@ -1159,7 +1535,40 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "Locating Discord installation..." "Blue"
         $bp = Get-RealClientPath $sc; if (-not $bp) { throw "Discord client folder not found. Please ensure it is installed or run Discord so we can detect the path." }
         Add-Status $statusBox $form "Path detected: $bp" "Cyan"
-        $ap = Find-DiscordAppPath $bp; if (-not $ap) { throw "No Discord app folder with voice module found in $bp" }
+        
+        # Use diagnostic mode for better error messages
+        $diag = Find-DiscordAppPath $bp -ReturnDiagnostics
+        if ($diag.Error) {
+            switch ($diag.Error) {
+                "NoAppFolders" { throw "No Discord app folders found. Discord may not be fully installed. Try running Discord once." }
+                "NoModulesFolder" { 
+                    # Offer automatic reinstall for official clients
+                    if ($sc.Name -match "\[Official\]") {
+                        Add-Status $statusBox $form "[X] No 'modules' folder found - Discord is corrupted" "Red"
+                        Add-Status $statusBox $form "" "White"
+                        
+                        $reinstallResult = Reinstall-DiscordClient -ClientPath $bp -ClientInfo $sc -StatusBox $statusBox -Form $form
+                        
+                        if ($reinstallResult) {
+                            # Re-check after reinstall
+                            $diag = Find-DiscordAppPath $bp -ReturnDiagnostics
+                            if ($diag.Error) {
+                                throw "Discord reinstalled but still has issues. Please try again or reinstall Discord manually."
+                            }
+                            Add-Status $statusBox $form "" "White"
+                            Add-Status $statusBox $form "Continuing with stereo fix..." "Blue"
+                        } else {
+                            throw "Discord reinstallation was cancelled or failed. Please reinstall Discord manually."
+                        }
+                    } else {
+                        throw "No 'modules' folder found in Discord ($($diag.LatestAppVersion)). Please reinstall $($sc.Name.Trim()) manually."
+                    }
+                }
+                "NoVoiceModule" { throw "No 'discord_voice' module found. Try joining a voice channel first, then run this fix again." }
+                default { throw "Could not find Discord installation structure." }
+            }
+        }
+        $ap = $diag.LatestAppFolder
         $av = Get-DiscordAppVersion $ap; Add-Status $statusBox $form "[OK] Found $($sc.Name) v$av" "LimeGreen"
         
         # Stop Discord

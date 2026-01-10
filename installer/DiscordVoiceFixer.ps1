@@ -134,29 +134,33 @@ function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar,
 }
 
 # 8. Process & Discord Handling
+# FIX #3: Return false on timeout instead of true
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
-    $p = Get-Process -Name $ProcessNames -EA SilentlyContinue
+    $p = Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue
     if ($p) {
-        $p | Stop-Process -Force -EA SilentlyContinue
+        $p | Stop-Process -Force -ErrorAction SilentlyContinue
         for ($i=0; $i -lt 20; $i++) {
-            if (-not (Get-Process -Name $ProcessNames -EA SilentlyContinue)) { return $true }
+            if (-not (Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue)) { return $true }
             Start-Sleep -Milliseconds 250
         }
-        return $true
+        # FIX: Return false if processes are still running after timeout
+        return $false
     }
     return $false
 }
 
+# FIX #9: Fixed $_ reference in catch block
 function Find-DiscordAppPath { param([string]$BasePath)
-    $af = gci $BasePath -Filter "app-*" -Directory -EA SilentlyContinue | 
+    $af = Get-ChildItem $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue | 
         Sort-Object { 
-            try { if ($_ -match "app-([\d\.]+)") { [Version]$matches[1] } else { $_.Name } } catch { $_.Name }
+            $folder = $_
+            try { if ($folder.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { $folder.Name } } catch { $folder.Name }
         } -Descending
     
     foreach ($f in $af) {
         $mp = Join-Path $f.FullName "modules"
         if (Test-Path $mp) { 
-            $vm = gci $mp -Filter "discord_voice*" -Directory -EA SilentlyContinue
+            $vm = Get-ChildItem $mp -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue
             if ($vm) { return $f.FullName } 
         }
     }
@@ -166,7 +170,7 @@ function Find-DiscordAppPath { param([string]$BasePath)
 function Get-DiscordAppVersion { param([string]$AppPath)
     if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }
     try {
-        $exe = gci $AppPath -Filter "*.exe" | Select-Object -First 1
+        $exe = Get-ChildItem $AppPath -Filter "*.exe" | Select-Object -First 1
         if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
     } catch {}
     return "Unknown"
@@ -183,7 +187,7 @@ function Start-DiscordClient { param([string]$ExePath)
 
 function Get-PathFromProcess { param([string]$ProcessName)
     try {
-        $p = Get-Process -Name $ProcessName -EA SilentlyContinue | Select-Object -First 1
+        $p = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($p) { return (Split-Path (Split-Path $p.MainModule.FileName -Parent) -Parent) }
     } catch {}
     return $null
@@ -193,7 +197,7 @@ function Get-PathFromShortcuts { param([string]$ShortcutName)
     if (-not $ShortcutName) { return $null }
     $sm = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
     if (!(Test-Path $sm)) { return $null }
-    $scs = gci $sm -Filter "$ShortcutName.lnk" -Recurse -EA SilentlyContinue
+    $scs = Get-ChildItem $sm -Filter "$ShortcutName.lnk" -Recurse -ErrorAction SilentlyContinue
     if (-not $scs) { return $null }
     $ws = New-Object -ComObject WScript.Shell
     foreach ($lf in $scs) { try { $sc = $ws.CreateShortcut($lf.FullName); if (Test-Path $sc.TargetPath) { return (Split-Path $sc.TargetPath -Parent) } } catch { } }
@@ -250,6 +254,7 @@ function Get-InstalledClients {
 }
 
 # 9. Download Logic (Output Silenced)
+# FIX #7: Added file validation for downloaded voice backup files
 function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         EnsureDir $DestinationPath
@@ -269,16 +274,46 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
         if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
 
         $fc = 0
+        $failedFiles = @()
         foreach ($f in $r) {
             if ($f.type -eq "file") {
                 $fp = Join-Path $DestinationPath $f.name
                 Add-Status $StatusBox $Form "  Downloading: $($f.name)" "Cyan"
-                Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30 | Out-Null
-                $fc++
+                try {
+                    Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30 | Out-Null
+                    
+                    # FIX #7: Validate downloaded file exists and has content
+                    if (-not (Test-Path $fp)) {
+                        throw "File was not created"
+                    }
+                    $fileInfo = Get-Item $fp
+                    if ($fileInfo.Length -eq 0) {
+                        throw "Downloaded file is empty"
+                    }
+                    
+                    # Validate known file types
+                    $ext = [System.IO.Path]::GetExtension($f.name).ToLower()
+                    if ($ext -eq ".node" -or $ext -eq ".dll") {
+                        # Binary files should be at least a few KB
+                        if ($fileInfo.Length -lt 1024) {
+                            Add-Status $StatusBox $Form "  [!] Warning: $($f.name) seems too small ($($fileInfo.Length) bytes)" "Orange"
+                        }
+                    }
+                    
+                    $fc++
+                } catch {
+                    Add-Status $StatusBox $Form "  [!] Failed to download $($f.name): $($_.Exception.Message)" "Orange"
+                    $failedFiles += $f.name
+                }
             }
         }
-        if ($fc -eq 0) { throw "No valid files found in repository." }
-        Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"; return $true
+        
+        if ($fc -eq 0) { throw "No valid files were downloaded." }
+        if ($failedFiles.Count -gt 0) {
+            Add-Status $StatusBox $Form "  [!] Warning: $($failedFiles.Count) file(s) failed to download" "Orange"
+        }
+        Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"
+        return $true
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; return $false }
 }
 
@@ -366,7 +401,7 @@ function Apply-EqApoFix {
             Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen"
         } catch {
             Add-Status $StatusBox $Form "  [X] Downloaded file is not valid JSON: $($_.Exception.Message)" "Red"
-            Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+            Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue
             return $false
         }
         
@@ -378,7 +413,7 @@ function Apply-EqApoFix {
             } catch {
                 Add-Status $StatusBox $Form "  [X] Could not remove old settings.json: $($_.Exception.Message)" "Red"
                 Add-Status $StatusBox $Form "    Make sure Discord is completely closed." "Yellow"
-                Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+                Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue
                 return $false
             }
         }
@@ -390,12 +425,12 @@ function Apply-EqApoFix {
             Add-Status $StatusBox $Form "[OK] EQ APO fix applied successfully!" "LimeGreen"
         } catch {
             Add-Status $StatusBox $Form "  [X] Could not install new settings.json: $($_.Exception.Message)" "Red"
-            Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+            Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue
             return $false
         }
         
         # Cleanup temp file
-        Remove-Item $tempSettingsPath -Force -EA SilentlyContinue
+        Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue
         
         Add-Status $StatusBox $Form "  Settings replaced at: $targetSettingsPath" "Cyan"
         return $true
@@ -541,12 +576,13 @@ function Create-VoiceBackup {
     }
 }
 
+# FIX #1: Improved array handling to prevent unwrapping issues
 function Get-AvailableBackups {
     Initialize-BackupDirectory
     $bks = [System.Collections.ArrayList]@()
     
     # First, add original backups (from original_discord_modules folder)
-    $originals = gci $ORIGINAL_BACKUP_ROOT -Directory -EA SilentlyContinue
+    $originals = Get-ChildItem $ORIGINAL_BACKUP_ROOT -Directory -ErrorAction SilentlyContinue
     foreach ($f in $originals) {
         $mp = Join-Path $f.FullName "metadata.json"
         if (Test-Path $mp) {
@@ -566,7 +602,7 @@ function Get-AvailableBackups {
     }
     
     # Then add regular backups (sorted by date, newest first)
-    $bfs = gci $BACKUP_ROOT -Directory -EA SilentlyContinue | Sort-Object Name -Descending
+    $bfs = Get-ChildItem $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
     foreach ($f in $bfs) {
         $mp = Join-Path $f.FullName "metadata.json"
         if (Test-Path $mp) {
@@ -584,7 +620,13 @@ function Get-AvailableBackups {
             } catch { continue }
         }
     }
-    return @($bks)  # FIX: Force array output to prevent single-item unwrapping
+    
+    # FIX #1: Always return as array, even with 0 or 1 items
+    # Using Write-Output with -NoEnumerate prevents PowerShell from unwrapping
+    if ($bks.Count -eq 0) {
+        return @()
+    }
+    return ,$bks.ToArray()
 }
 
 function Restore-FromBackup {
@@ -598,7 +640,7 @@ function Restore-FromBackup {
             } else {
                 Add-Status $StatusBox $Form "  Restoring voice module..." "Cyan"
             }
-            if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $TargetVoicePath }
+            if (Test-Path $TargetVoicePath) { Remove-Item "$TargetVoicePath\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $TargetVoicePath }
             Copy-Item "$vbp\*" $TargetVoicePath -Recurse -Force
         }
         return $true
@@ -607,7 +649,7 @@ function Restore-FromBackup {
 
 function Remove-OldBackups {
     # Only remove old backups from BACKUP_ROOT, NEVER touch ORIGINAL_BACKUP_ROOT
-    $bfs = gci $BACKUP_ROOT -Directory -EA SilentlyContinue
+    $bfs = Get-ChildItem $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue
     
     # Group by client and keep only the latest for each
     $byClient = @{}
@@ -632,7 +674,7 @@ function Remove-OldBackups {
     foreach ($clientKey in $byClient.Keys) {
         $backups = $byClient[$clientKey] | Sort-Object { $_.BackupDate } -Descending
         $backups | Select-Object -Skip 1 | ForEach-Object { 
-            Remove-Item $_.Path -Recurse -Force -EA SilentlyContinue 
+            Remove-Item $_.Path -Recurse -Force -ErrorAction SilentlyContinue 
         }
     }
 }
@@ -654,7 +696,7 @@ function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
 function Save-FixState { param([string]$ClientName, [string]$Version)
     Initialize-BackupDirectory
     $st = Get-StateData; if (-not $st) { $st = @{} }
-    if ($st -is [PSCustomObject]) { $ns = @{}; $st.PSObject.Properties | % { $ns[$_.Name] = $_.Value }; $st = $ns }
+    if ($st -is [PSCustomObject]) { $ns = @{}; $st.PSObject.Properties | ForEach-Object { $ns[$_.Name] = $_.Value }; $st = $ns }
     $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
     $st[$ck] = @{LastFixedVersion=$Version; LastFixDate=(Get-Date).ToString("o")}
     Save-StateData $st
@@ -686,7 +728,7 @@ function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$f
 
 function Remove-StartupShortcut {
     $sp = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
-    if (Test-Path $sp) { Remove-Item $sp -Force -EA SilentlyContinue }
+    if (Test-Path $sp) { Remove-Item $sp -Force -ErrorAction SilentlyContinue }
 }
 
 function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
@@ -697,6 +739,7 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
 }
 
 # === SILENT / CHECK-ONLY MODE ===
+# FIX #4 & #5: Added EQ APO fix and startup shortcut support to silent mode
 if ($Silent -or $CheckOnly) {
     $ic = Get-InstalledClients
     if ($ic.Count -eq 0) { Write-Host "No Discord clients found."; exit 1 }
@@ -712,7 +755,7 @@ if ($Silent -or $CheckOnly) {
         if ($nf) { exit 1 }; exit 0
     }
     
-    if ($FixClient) { $ic = @($ic | ? { $_.Name -like "*$FixClient*" }); if ($ic.Count -eq 0) { Write-Host "Client '$FixClient' not found."; exit 1 } }
+    if ($FixClient) { $ic = @($ic | Where-Object { $_.Name -like "*$FixClient*" }); if ($ic.Count -eq 0) { Write-Host "Client '$FixClient' not found."; exit 1 } }
     
     $up = @{}; $uc = [System.Collections.ArrayList]@()
     foreach ($c in $ic) { if (-not $up.ContainsKey($c.AppPath)) { $up[$c.AppPath] = $true; [void]$uc.Add($c) } }
@@ -725,28 +768,59 @@ if ($Silent -or $CheckOnly) {
         if (-not (Download-VoiceBackupFiles $vbp $null $null)) { throw "Download Failed" }
         
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
-        Stop-DiscordProcesses $allProcs; Start-Sleep -Seconds 1
+        $stopResult = Stop-DiscordProcesses $allProcs
+        
+        # FIX #3: Handle process termination failure
+        if (-not $stopResult) {
+            Write-Host "[!] Warning: Some Discord processes may still be running"
+            Start-Sleep -Seconds 2  # Give extra time
+        }
+        Start-Sleep -Seconds 1
+        
         $set = Load-Settings; $fxc = 0
         
         foreach ($ci in $uc) {
             $cl = $ci.Client; $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
             Write-Host "Fixing $($cl.Name.Trim()) v$av..."
             try {
-                $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
                 if (-not $vm) { throw "No voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
                 
                 Create-VoiceBackup $tvf $cl.Name $av $null $null | Out-Null
-                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
                 Copy-Item "$vbp\*" $tvf -Recurse -Force
                 Save-FixState $cl.Name $av; Write-Host "  [OK] Fixed successfully"; $fxc++
             } catch { Write-Host "  [FAIL] $($_.Exception.Message)" }
         }
         
         Remove-OldBackups
-        if ($set.AutoStartDiscord -and $fxc -gt 0) { $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." }
+        
+        # FIX #4: Apply EQ APO fix in silent mode if enabled
+        if ($set.FixEqApo) {
+            Write-Host "Applying EQ APO fix..."
+            $eqResult = Apply-EqApoFix $null $null $true  # Skip confirmation in silent mode
+            if ($eqResult) { Write-Host "  [OK] EQ APO fix applied" }
+            else { Write-Host "  [FAIL] EQ APO fix failed" }
+        }
+        
+        # FIX #5: Handle startup shortcut in silent mode
+        if ($set.CreateShortcut) {
+            $spt = $SAVED_SCRIPT_PATH
+            if (!(Test-Path $spt)) { 
+                $spt = Save-ScriptToAppData $null $null 
+            }
+            if ($spt) { 
+                Create-StartupShortcut $spt $set.SilentStartup
+                Write-Host "  [OK] Startup shortcut created/updated"
+            }
+        }
+        
+        if ($set.AutoStartDiscord -and $fxc -gt 0) { 
+            $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." 
+        }
         Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
-    } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue } }
+    } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue } }
 }
 
 # === GUI MODE ===
@@ -838,7 +912,7 @@ function Update-ScriptStatusLabel {
 
 function Update-DiscordRunningWarning {
     $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
-    $r = Get-Process -Name $dp -EA SilentlyContinue
+    $r = Get-Process -Name $dp -ErrorAction SilentlyContinue
     if ($r) { $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"; $discordRunningLabel.Visible = $true }
     else { $discordRunningLabel.Text = ""; $discordRunningLabel.Visible = $false }
 }
@@ -866,7 +940,7 @@ $btnFixEqApo.Add_Click({
         
         # Check if Discord is running and offer to close it
         $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
-        $r = Get-Process -Name $dp -EA SilentlyContinue
+        $r = Get-Process -Name $dp -ErrorAction SilentlyContinue
         if ($r) {
             $closeResult = [System.Windows.Forms.MessageBox]::Show(
                 $form,
@@ -879,8 +953,13 @@ $btnFixEqApo.Add_Click({
             if ($closeResult -eq "Yes") {
                 Add-Status $statusBox $form "Closing Discord processes..." "Blue"
                 $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
-                Stop-DiscordProcesses $allProcs
-                Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+                $stopResult = Stop-DiscordProcesses $allProcs
+                if ($stopResult) {
+                    Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+                } else {
+                    Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"
+                    Start-Sleep -Seconds 2
+                }
                 Start-Sleep -Seconds 1
             } else {
                 Add-Status $statusBox $form "EQ APO fix cancelled - Discord must be closed" "Yellow"
@@ -973,7 +1052,7 @@ $btnCheckUpdate.Add_Click({
 $btnRollback.Add_Click({
     $statusBox.Clear(); $sc = $DiscordClients[$clientCombo.SelectedIndex]
     Add-Status $statusBox $form "Loading available backups..." "Blue"
-    $bks = @(Get-AvailableBackups)  # FIX: Ensure array at call site too
+    $bks = @(Get-AvailableBackups)
     if ($bks.Count -eq 0) { Add-Status $statusBox $form "[X] No backups found" "Red"; [System.Windows.Forms.MessageBox]::Show($form,"No backups available. Run 'Start Fix' first to create a backup.","No Backups","OK","Information"); return }
     
     $rf = New-Object System.Windows.Forms.Form
@@ -1014,10 +1093,15 @@ $btnRollback.Add_Click({
         }
         
         Add-Status $statusBox $form "Starting rollback..." "Blue"; Add-Status $statusBox $form "  Selected: $($sb.DisplayName)" "Cyan"
-        Add-Status $statusBox $form "Closing Discord processes..." "Blue"; Stop-DiscordProcesses $sc.Processes
+        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
+        $stopResult = Stop-DiscordProcesses $sc.Processes
+        if (-not $stopResult) {
+            Add-Status $statusBox $form "[!] Warning: Some processes may still be running" "Orange"
+            Start-Sleep -Seconds 2
+        }
         $bp = Get-RealClientPath $sc; if (-not $bp) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
         $ap = Find-DiscordAppPath $bp; if (-not $ap) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
-        $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
         if (-not $vm) { Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"; return }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
         
@@ -1059,7 +1143,7 @@ $btnStart.Add_Click({
                             Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
                             Start-Sleep -Seconds 3; Apply-ScriptUpdate $uf $cs; $form.Close(); return
                         } else { Add-Status $statusBox $form "Update downloaded to: $uf" "Orange"; Add-Status $statusBox $form "Please manually replace the script file to update." "Orange" }
-                    } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -EA SilentlyContinue }
+                    } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -ErrorAction SilentlyContinue }
                 }
             } catch { Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange" }
         }
@@ -1081,12 +1165,16 @@ $btnStart.Add_Click({
         # Stop Discord
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"
         $ka = Stop-DiscordProcesses $sc.Processes
-        if ($ka) { Add-Status $statusBox $form "  Discord processes terminated" "Cyan" } else { Add-Status $statusBox $form "  No Discord processes were running" "Yellow" }
+        if ($ka) { Add-Status $statusBox $form "  Discord processes terminated" "Cyan" } 
+        else { 
+            Add-Status $statusBox $form "  [!] Some processes may still be running, waiting..." "Orange"
+            Start-Sleep -Seconds 2
+        }
         Update-Progress $progressBar $form 40; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 50
         
         # Locate voice module
         Add-Status $statusBox $form "Locating voice module..." "Blue"
-        $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
         if (-not $vm) { throw "No discord_voice module found" }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
         Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
@@ -1098,7 +1186,7 @@ $btnStart.Add_Click({
         Update-Progress $progressBar $form 60
         
         Add-Status $statusBox $form "Removing old voice module files..." "Blue"
-        if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+        if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
         Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"; Update-Progress $progressBar $form 70
         
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
@@ -1144,7 +1232,7 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
         Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
     } finally {
-        if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
+        if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue }
         $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true; $btnFixEqApo.Enabled = $true
     }
 })
@@ -1178,20 +1266,25 @@ $btnFixAll.Add_Click({
         
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
-        Stop-DiscordProcesses $allProcs; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
+        $stopResult = Stop-DiscordProcesses $allProcs
+        if (-not $stopResult) {
+            Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"
+            Start-Sleep -Seconds 2
+        }
+        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
         
         $ppc = 50 / $uc.Count; $cp = 30; $fxc = 0; $fc = @()
         foreach ($ci in $uc) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== Fixing: $($ci.Name.Trim()) ===" "Blue"
             try {
                 $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
-                $vm = gci "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
                 if (-not $vm) { throw "No discord_voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
                 
                 Add-Status $statusBox $form "  Creating backup..." "Cyan"
                 Create-VoiceBackup $tvf $ci.Name $av $statusBox $form | Out-Null
-                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -EA SilentlyContinue } else { EnsureDir $tvf }
+                if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
                 Add-Status $statusBox $form "  Copying module files..." "Cyan"; Copy-Item "$vbp\*" $tvf -Recurse -Force
                 
                 Save-FixState $ci.Name $av; Add-Status $statusBox $form "[OK] $($ci.Name.Trim()) fixed successfully" "LimeGreen"; $fxc++
@@ -1234,7 +1327,7 @@ $btnFixAll.Add_Click({
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
         Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
     } finally {
-        if (Test-Path $td) { Remove-Item $td -Recurse -Force -EA SilentlyContinue }
+        if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue }
         $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true; $btnFixEqApo.Enabled = $true
     }
 })

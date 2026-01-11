@@ -134,7 +134,7 @@ function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar,
 }
 
 # 8. Process & Discord Handling
-# FIX #3: Return false on timeout instead of true
+# FIX #1: Corrected return value - return $true when no processes were running (that's success)
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $p = Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue
     if ($p) {
@@ -143,13 +143,13 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
             if (-not (Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue)) { return $true }
             Start-Sleep -Milliseconds 250
         }
-        # FIX: Return false if processes are still running after timeout
+        # Return false if processes are still running after timeout
         return $false
     }
-    return $false
+    # FIX: No processes were running - this is success, not failure
+    return $true
 }
 
-# FIX #9: Fixed $_ reference in catch block
 # IMPROVED: Better diagnostics for why Discord wasn't found
 function Find-DiscordAppPath { 
     param([string]$BasePath, [switch]$ReturnDiagnostics)
@@ -802,7 +802,7 @@ function Create-VoiceBackup {
     }
 }
 
-# FIX #1: Improved array handling to prevent unwrapping issues
+# Improved array handling to prevent unwrapping issues
 function Get-AvailableBackups {
     Initialize-BackupDirectory
     $bks = [System.Collections.ArrayList]@()
@@ -847,8 +847,7 @@ function Get-AvailableBackups {
         }
     }
     
-    # FIX #1: Always return as array, even with 0 or 1 items
-    # Using Write-Output with -NoEnumerate prevents PowerShell from unwrapping
+    # Always return as array, even with 0 or 1 items
     if ($bks.Count -eq 0) {
         return @()
     }
@@ -968,7 +967,6 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
 }
 
 # === SILENT / CHECK-ONLY MODE ===
-# FIX #4 & #5: Added EQ APO fix and startup shortcut support to silent mode
 if ($Silent -or $CheckOnly) {
     $ic = Get-InstalledClients
     
@@ -1060,7 +1058,50 @@ if ($Silent -or $CheckOnly) {
         $ic = Get-InstalledClients
     }
     
-    if ($ic.Count -eq 0) { Write-Host "No Discord clients found."; exit 1 }
+    # FIX #2: Better error messages when no clients found
+    if ($ic.Count -eq 0) { 
+        # Check if there are installations missing voice module (but have modules folder)
+        $noVoiceClients = @()
+        $noModulesClients = @()
+        
+        foreach ($k in $DiscordClients.Keys) {
+            $c = $DiscordClients[$k]
+            $clientPath = $c.Path
+            if (Test-Path $clientPath) {
+                $diag = Find-DiscordAppPath $clientPath -ReturnDiagnostics
+                if ($diag.Error -eq "NoVoiceModule") {
+                    $noVoiceClients += $c.Name.Trim()
+                } elseif ($diag.Error -eq "NoModulesFolder") {
+                    $noModulesClients += $c.Name.Trim()
+                }
+            }
+        }
+        
+        if ($noVoiceClients.Count -gt 0) {
+            Write-Host "[!] Discord found but voice module not downloaded yet."
+            Write-Host "    The voice module downloads when you first join a voice channel."
+            Write-Host ""
+            Write-Host "    To fix this:"
+            Write-Host "    1) Open Discord"
+            Write-Host "    2) Join any voice channel"
+            Write-Host "    3) Wait 30 seconds for modules to download"
+            Write-Host "    4) Run this script again"
+            Write-Host ""
+            Write-Host "    Affected clients: $($noVoiceClients -join ', ')"
+            exit 1
+        }
+        
+        if ($noModulesClients.Count -gt 0) {
+            Write-Host "[!] Discord installation is corrupted (missing modules folder)."
+            Write-Host "    Affected clients: $($noModulesClients -join ', ')"
+            Write-Host ""
+            Write-Host "    Please run the script in GUI mode to auto-repair, or reinstall Discord manually."
+            exit 1
+        }
+        
+        Write-Host "No Discord clients found."
+        exit 1 
+    }
     
     if ($CheckOnly) {
         Write-Host "Checking Discord versions..."; $nf = $false
@@ -1088,7 +1129,7 @@ if ($Silent -or $CheckOnly) {
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         $stopResult = Stop-DiscordProcesses $allProcs
         
-        # FIX #3: Handle process termination failure
+        # Handle process termination - now $stopResult is true if no processes were running
         if (-not $stopResult) {
             Write-Host "[!] Warning: Some Discord processes may still be running"
             Start-Sleep -Seconds 2  # Give extra time
@@ -1114,7 +1155,7 @@ if ($Silent -or $CheckOnly) {
         
         Remove-OldBackups
         
-        # FIX #4: Apply EQ APO fix in silent mode if enabled
+        # Apply EQ APO fix in silent mode if enabled
         if ($set.FixEqApo) {
             Write-Host "Applying EQ APO fix..."
             $eqResult = Apply-EqApoFix $null $null $true  # Skip confirmation in silent mode
@@ -1122,7 +1163,7 @@ if ($Silent -or $CheckOnly) {
             else { Write-Host "  [FAIL] EQ APO fix failed" }
         }
         
-        # FIX #5: Handle startup shortcut in silent mode
+        # Handle startup shortcut in silent mode
         if ($set.CreateShortcut) {
             $spt = $SAVED_SCRIPT_PATH
             if (!(Test-Path $spt)) { 
@@ -1191,7 +1232,7 @@ $chkSilentStartup = New-StyledCheckBox 40 91 400 22 "Run silently on startup (no
 $chkSilentStartup.Enabled = $chkShortcut.Checked; $chkSilentStartup.Visible = $chkShortcut.Checked; $optionsGroup.Controls.Add($chkSilentStartup)
 $chkAutoStart = New-StyledCheckBox 20 113 420 22 "Automatically start Discord after fixing" $settings.AutoStartDiscord; $optionsGroup.Controls.Add($chkAutoStart)
 
-# NEW: EQ APO Fix Checkbox
+# EQ APO Fix Checkbox
 $chkFixEqApo = New-StyledCheckBox 20 135 420 22 "Fix EQ APO not working (replaces settings.json)" $settings.FixEqApo $Theme.Warning
 $optionsGroup.Controls.Add($chkFixEqApo)
 
@@ -1215,7 +1256,7 @@ $btnRollback = New-StyledButton 230 575 70 38 "Rollback" $Fonts.ButtonSmall $The
 $btnOpenBackups = New-StyledButton 305 575 70 38 "Backups" $Fonts.ButtonSmall $Theme.Secondary; $form.Controls.Add($btnOpenBackups)
 $btnCheckUpdate = New-StyledButton 380 575 100 38 "Check" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnCheckUpdate)
 
-# NEW: EQ APO Fix Button
+# EQ APO Fix Button
 $btnFixEqApo = New-StyledButton 20 620 220 32 "Apply EQ APO Fix Only" $Fonts.ButtonSmall $Theme.Warning; $form.Controls.Add($btnFixEqApo)
 
 # Helper Functions for GUI
@@ -1247,7 +1288,7 @@ $chkShortcut.Add_CheckedChanged({ $chkSilentStartup.Enabled = $chkShortcut.Check
 $btnSaveScript.Add_Click({ $statusBox.Clear(); $sp = Save-ScriptToAppData $statusBox $form; if ($sp) { Update-ScriptStatusLabel; [System.Windows.Forms.MessageBox]::Show($form,"Script saved to:`n$sp`n`nYou can now create a startup shortcut.","Script Saved","OK","Information") } })
 $btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.exe" $APP_DATA_ROOT })
 
-# NEW: EQ APO Fix Only Button Handler
+# EQ APO Fix Only Button Handler
 $btnFixEqApo.Add_Click({
     $btnFixEqApo.Enabled = $false
     $statusBox.Clear()
@@ -1603,7 +1644,7 @@ $btnStart.Add_Click({
         
         Save-FixState $sc.Name $av
         
-        # NEW: Apply EQ APO fix if checkbox is checked
+        # Apply EQ APO fix if checkbox is checked
         if ($chkFixEqApo.Checked) {
             Update-Progress $progressBar $form 82
             $eqApoResult = Apply-EqApoFix $statusBox $form $false
@@ -1703,7 +1744,7 @@ $btnFixAll.Add_Click({
         
         Remove-OldBackups; Update-Progress $progressBar $form 85
 
-        # NEW: Apply EQ APO fix if checkbox is checked
+        # Apply EQ APO fix if checkbox is checked
         if ($chkFixEqApo.Checked) {
             $eqApoResult = Apply-EqApoFix $statusBox $form $false
             if (-not $eqApoResult) {

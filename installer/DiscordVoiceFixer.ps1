@@ -35,15 +35,15 @@ $Fonts = @{
 
 # 4. Discord Clients Database
 $DiscordClients = [ordered]@{
-    0 = @{Name="Discord - Stable         [Official]"; Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
-    1 = @{Name="Discord - Canary         [Official]"; Path="$env:LOCALAPPDATA\DiscordCanary";      Processes=@("DiscordCanary","Update");      Exe="DiscordCanary.exe";      Shortcut="Discord Canary"}
-    2 = @{Name="Discord - PTB            [Official]"; Path="$env:LOCALAPPDATA\DiscordPTB";         Processes=@("DiscordPTB","Update");         Exe="DiscordPTB.exe";         Shortcut="Discord PTB"}
-    3 = @{Name="Discord - Development    [Official]"; Path="$env:LOCALAPPDATA\DiscordDevelopment"; Processes=@("DiscordDevelopment","Update"); Exe="DiscordDevelopment.exe"; Shortcut="Discord Development"}
-    4 = @{Name="Lightcord                [Mod]";      Path="$env:LOCALAPPDATA\Lightcord";          Processes=@("Lightcord","Update");          Exe="Lightcord.exe";          Shortcut="Lightcord"}
-    5 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
-    6 = @{Name="Vencord                  [Mod]";      Path="$env:LOCALAPPDATA\Vencord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Vencord","Discord","Update");       Exe="Discord.exe"; Shortcut="Vencord"}
-    7 = @{Name="Equicord                 [Mod]";      Path="$env:LOCALAPPDATA\Equicord";           FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Equicord","Discord","Update");      Exe="Discord.exe"; Shortcut="Equicord"}
-    8 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
+    0 = @{Name="Discord - Stable         [Official]"; Path="$env:LOCALAPPDATA\Discord";            RoamingPath="$env:APPDATA\discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
+    1 = @{Name="Discord - Canary         [Official]"; Path="$env:LOCALAPPDATA\DiscordCanary";      RoamingPath="$env:APPDATA\discordcanary";      Processes=@("DiscordCanary","Update");      Exe="DiscordCanary.exe";      Shortcut="Discord Canary"}
+    2 = @{Name="Discord - PTB            [Official]"; Path="$env:LOCALAPPDATA\DiscordPTB";         RoamingPath="$env:APPDATA\discordptb";         Processes=@("DiscordPTB","Update");         Exe="DiscordPTB.exe";         Shortcut="Discord PTB"}
+    3 = @{Name="Discord - Development    [Official]"; Path="$env:LOCALAPPDATA\DiscordDevelopment"; RoamingPath="$env:APPDATA\discorddevelopment"; Processes=@("DiscordDevelopment","Update"); Exe="DiscordDevelopment.exe"; Shortcut="Discord Development"}
+    4 = @{Name="Lightcord                [Mod]";      Path="$env:LOCALAPPDATA\Lightcord";          RoamingPath="$env:APPDATA\Lightcord";          Processes=@("Lightcord","Update");          Exe="Lightcord.exe";          Shortcut="Lightcord"}
+    5 = @{Name="BetterDiscord            [Mod]";      Path="$env:LOCALAPPDATA\Discord";            RoamingPath="$env:APPDATA\discord";            Processes=@("Discord","Update");            Exe="Discord.exe";            Shortcut="Discord"}
+    6 = @{Name="Vencord                  [Mod]";      Path="$env:LOCALAPPDATA\Vencord";            RoamingPath="$env:APPDATA\discord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Vencord","Discord","Update");       Exe="Discord.exe"; Shortcut="Vencord"}
+    7 = @{Name="Equicord                 [Mod]";      Path="$env:LOCALAPPDATA\Equicord";           RoamingPath="$env:APPDATA\discord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("Equicord","Discord","Update");      Exe="Discord.exe"; Shortcut="Equicord"}
+    8 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      RoamingPath="$env:APPDATA\discord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
 # 5. URLs & Paths
@@ -59,7 +59,6 @@ $STATE_FILE = "$APP_DATA_ROOT\state.json"
 $SETTINGS_FILE = "$APP_DATA_ROOT\settings.json"
 $SAVED_SCRIPT_PATH = "$APP_DATA_ROOT\DiscordVoiceFixer.ps1"
 $SETTINGS_BACKUP_ROOT = "$APP_DATA_ROOT\settings_backups"
-$DISCORD_ROAMING_PATH = "$env:APPDATA\discord"
 
 # 6. Core Utility Functions
 function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
@@ -381,48 +380,92 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
 
 # 10. EQ APO Fix
 function Apply-EqApoFix {
-    param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [bool]$SkipConfirmation = $false)
+    param(
+        [string]$RoamingPath,
+        [string]$ClientName,
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form,
+        [bool]$SkipConfirmation = $false
+    )
     try {
         Add-Status $StatusBox $Form "" "White"
-        Add-Status $StatusBox $Form "=== EQ APO FIX ===" "Blue"
-        if (-not (Test-Path $DISCORD_ROAMING_PATH)) {
-            Add-Status $StatusBox $Form "[X] Discord roaming folder not found: $DISCORD_ROAMING_PATH" "Red"
+        Add-Status $StatusBox $Form "=== EQ APO FIX: $ClientName ===" "Blue"
+        
+        if (-not (Test-Path $RoamingPath)) {
+            Add-Status $StatusBox $Form "[X] Discord roaming folder not found: $RoamingPath" "Red"
             Add-Status $StatusBox $Form "    Please ensure Discord has been run at least once." "Yellow"
             return $false
         }
-        $targetSettingsPath = Join-Path $DISCORD_ROAMING_PATH "settings.json"
+        
+        $targetSettingsPath = Join-Path $RoamingPath "settings.json"
+        
         if (-not $SkipConfirmation) {
-            $confirmResult = [System.Windows.Forms.MessageBox]::Show($Form, "Replace Discord settings.json to fix EQ APO?", "Confirm EQ APO Fix", "YesNo", "Question")
+            $confirmResult = [System.Windows.Forms.MessageBox]::Show($Form, "Replace Discord settings.json to fix EQ APO for $($ClientName)?", "Confirm EQ APO Fix", "YesNo", "Question")
             if ($confirmResult -ne "Yes") { Add-Status $StatusBox $Form "EQ APO fix cancelled by user" "Yellow"; return $false }
         }
-        Add-Status $StatusBox $Form "Applying EQ APO fix..." "Blue"
+        
+        Add-Status $StatusBox $Form "Applying EQ APO fix to $ClientName..." "Blue"
+        
         if (Test-Path $targetSettingsPath) {
             EnsureDir $SETTINGS_BACKUP_ROOT
+            $sanitizedName = $ClientName -replace '\s+','_' -replace '\[|\]','' -replace '-','_'
             $backupTimestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
-            $backupPath = Join-Path $SETTINGS_BACKUP_ROOT "settings_$backupTimestamp.json"
+            $backupPath = Join-Path $SETTINGS_BACKUP_ROOT "settings_${sanitizedName}_$backupTimestamp.json"
             Add-Status $StatusBox $Form "  Backing up existing settings.json..." "Cyan"
-            try { Copy-Item $targetSettingsPath $backupPath -Force; Add-Status $StatusBox $Form "  [OK] Backup created: settings_$backupTimestamp.json" "LimeGreen" }
+            try { Copy-Item $targetSettingsPath $backupPath -Force; Add-Status $StatusBox $Form "  [OK] Backup created: settings_${sanitizedName}_$backupTimestamp.json" "LimeGreen" }
             catch { Add-Status $StatusBox $Form "  [!] Warning: Could not create backup: $($_.Exception.Message)" "Orange" }
         } else { Add-Status $StatusBox $Form "  No existing settings.json found (will create new)" "Yellow" }
+        
         Add-Status $StatusBox $Form "  Downloading settings.json from GitHub..." "Cyan"
         $tempSettingsPath = Join-Path $env:TEMP "discord_settings_$(Get-Random).json"
         try { Invoke-WebRequest -Uri $SETTINGS_JSON_URL -OutFile $tempSettingsPath -UseBasicParsing -TimeoutSec 30 | Out-Null }
         catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) { Add-Status $StatusBox $Form "  [X] settings.json not found in repository" "Red"; return $false }; throw $_ }
+        
         Add-Status $StatusBox $Form "  Verifying downloaded file..." "Cyan"
         try { $jsonContent = Get-Content $tempSettingsPath -Raw | ConvertFrom-Json; if ($null -eq $jsonContent) { throw "Downloaded file is empty or invalid" }; Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen" }
         catch { Add-Status $StatusBox $Form "  [X] Downloaded file is not valid JSON: $($_.Exception.Message)" "Red"; Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue; return $false }
+        
         if (Test-Path $targetSettingsPath) {
             Add-Status $StatusBox $Form "  Removing old settings.json..." "Cyan"
             try { Remove-Item $targetSettingsPath -Force }
             catch { Add-Status $StatusBox $Form "  [X] Could not remove old settings.json: $($_.Exception.Message)" "Red"; Add-Status $StatusBox $Form "    Make sure Discord is completely closed." "Yellow"; Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue; return $false }
         }
+        
         Add-Status $StatusBox $Form "  Installing new settings.json..." "Cyan"
-        try { Copy-Item $tempSettingsPath $targetSettingsPath -Force; Add-Status $StatusBox $Form "[OK] EQ APO fix applied successfully!" "LimeGreen" }
+        try { Copy-Item $tempSettingsPath $targetSettingsPath -Force; Add-Status $StatusBox $Form "[OK] EQ APO fix applied successfully for $ClientName!" "LimeGreen" }
         catch { Add-Status $StatusBox $Form "  [X] Could not install new settings.json: $($_.Exception.Message)" "Red"; Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue; return $false }
+        
         Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue
         Add-Status $StatusBox $Form "  Settings replaced at: $targetSettingsPath" "Cyan"
         return $true
     } catch { Add-Status $StatusBox $Form "[X] EQ APO fix failed: $($_.Exception.Message)" "Red"; return $false }
+}
+
+function Apply-EqApoFixAll {
+    param(
+        [System.Windows.Forms.RichTextBox]$StatusBox,
+        [System.Windows.Forms.Form]$Form,
+        [bool]$SkipConfirmation = $false
+    )
+    
+    $processedPaths = [System.Collections.Generic.HashSet[string]]@()
+    $successCount = 0
+    $failCount = 0
+    
+    foreach ($k in $DiscordClients.Keys) {
+        $client = $DiscordClients[$k]
+        $roamingPath = $client.RoamingPath
+        
+        if ($processedPaths.Contains($roamingPath)) { continue }
+        if (-not (Test-Path $roamingPath)) { continue }
+        
+        [void]$processedPaths.Add($roamingPath)
+        
+        $result = Apply-EqApoFix -RoamingPath $roamingPath -ClientName $client.Name.Trim() -StatusBox $StatusBox -Form $Form -SkipConfirmation $SkipConfirmation
+        if ($result) { $successCount++ } else { $failCount++ }
+    }
+    
+    return @{ Success = $successCount; Failed = $failCount; Total = $processedPaths.Count }
 }
 
 # 11. Backup/Restore Logic
@@ -765,7 +808,18 @@ if ($Silent -or $CheckOnly) {
             } catch { Write-Host "  [FAIL] $($_.Exception.Message)" }
         }
         Remove-OldBackups
-        if ($set.FixEqApo) { Write-Host "Applying EQ APO fix..."; $eqResult = Apply-EqApoFix $null $null $true; if ($eqResult) { Write-Host "  [OK] EQ APO fix applied" } else { Write-Host "  [FAIL] EQ APO fix failed" } }
+        if ($set.FixEqApo) {
+            Write-Host "Applying EQ APO fix to all clients..."
+            $processedPaths = [System.Collections.Generic.HashSet[string]]@()
+            foreach ($ci in $uc) {
+                $roamingPath = $ci.Client.RoamingPath
+                if ($processedPaths.Contains($roamingPath)) { continue }
+                if (-not (Test-Path $roamingPath)) { continue }
+                [void]$processedPaths.Add($roamingPath)
+                $result = Apply-EqApoFix -RoamingPath $roamingPath -ClientName $ci.Client.Name.Trim() -StatusBox $null -Form $null -SkipConfirmation $true
+                if ($result) { Write-Host "  [OK] EQ APO fix applied to $($ci.Client.Name.Trim())" } else { Write-Host "  [FAIL] EQ APO fix failed for $($ci.Client.Name.Trim())" }
+            }
+        }
         if ($set.CreateShortcut) { $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $null $null }; if ($spt) { Create-StartupShortcut $spt $set.SilentStartup; Write-Host "  [OK] Startup shortcut created/updated" } }
         if ($set.AutoStartDiscord -and $fxc -gt 0) { $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." }
         Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
@@ -879,15 +933,15 @@ $btnFixEqApo.Add_Click({
             } else { Add-Status $statusBox $form "EQ APO fix cancelled - Discord must be closed" "Yellow"; return }
         }
         Update-Progress $progressBar $form 30
-        $result = Apply-EqApoFix $statusBox $form $false
+        $result = Apply-EqApoFixAll $statusBox $form $true
         Update-Progress $progressBar $form 90
-        if ($result) {
+        if ($result.Success -gt 0) {
             if ($chkAutoStart.Checked) {
                 $sc = $DiscordClients[$clientCombo.SelectedIndex]; $bp = Get-RealClientPath $sc
                 if ($bp) { $ap = Find-DiscordAppPath $bp; if ($ap) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" } } }
             }
             Update-Progress $progressBar $form 100; Play-CompletionSound $true
-            [System.Windows.Forms.MessageBox]::Show($form, "EQ APO fix applied successfully!", "Success", "OK", "Information")
+            [System.Windows.Forms.MessageBox]::Show($form, "EQ APO fix applied to $($result.Success) client(s)!", "Success", "OK", "Information")
         } else { Update-Progress $progressBar $form 100; Play-CompletionSound $false }
     } catch { Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"; Play-CompletionSound $false }
     finally { $btnFixEqApo.Enabled = $true }
@@ -1106,7 +1160,12 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "Copying updated module files..." "Blue"
         Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 80
         Save-FixState $sc.Name $av
-        if ($chkFixEqApo.Checked) { Update-Progress $progressBar $form 82; $eqApoResult = Apply-EqApoFix $statusBox $form $false; if (-not $eqApoResult) { Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange" } }
+        if ($chkFixEqApo.Checked) {
+            Update-Progress $progressBar $form 82
+            $roamingPath = $sc.RoamingPath
+            $eqApoResult = Apply-EqApoFix -RoamingPath $roamingPath -ClientName $sc.Name.Trim() -StatusBox $statusBox -Form $form -SkipConfirmation $false
+            if (-not $eqApoResult) { Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange" }
+        }
         Update-Progress $progressBar $form 85
         if ($chkShortcut.Checked) {
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
@@ -1176,7 +1235,11 @@ $btnFixAll.Add_Click({
             $cp += $ppc; Update-Progress $progressBar $form ([int]$cp)
         }
         Remove-OldBackups; Update-Progress $progressBar $form 85
-        if ($chkFixEqApo.Checked) { $eqApoResult = Apply-EqApoFix $statusBox $form $false; if (-not $eqApoResult) { Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange" } }
+        if ($chkFixEqApo.Checked) {
+            $eqResult = Apply-EqApoFixAll $statusBox $form $true
+            if ($eqResult.Success -eq 0) { Add-Status $statusBox $form "[!] EQ APO fix was not applied to any clients" "Orange" }
+            else { Add-Status $statusBox $form "[OK] EQ APO fix applied to $($eqResult.Success) client(s)" "LimeGreen" }
+        }
         Update-Progress $progressBar $form 90
         if ($chkShortcut.Checked) {
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"

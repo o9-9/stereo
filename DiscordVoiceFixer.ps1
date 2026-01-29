@@ -431,14 +431,23 @@ function Reinstall-DiscordClient {
         Add-Status $StatusBox $Form "This usually means Discord is corrupted or very outdated." "Yellow"
 
         if (-not $SkipConfirmation) {
-            $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                $Form,
-                "Your Discord installation appears to be corrupted or outdated (missing modules folder).`n`nWould you like to automatically reinstall Discord?",
-                "Reinstall Discord?",
-                "YesNo",
-                "Question"
-            )
-
+      $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+    $Form,
+    "Discord appears to be corrupted because its internal 'modules' folder is missing.`n`n" +
+    "This folder is required for Discord's voice system to function correctly.`n`n" +
+    "To fix this, the installer will perform a safe automatic repair by:`n" +
+    "• Fully closing Discord`n" +
+    "• Removing the broken Discord app files`n" +
+    "• Downloading and installing the latest official Discord version`n" +
+    "• Allowing Discord to rebuild its missing voice modules`n" +
+    "• Applying the stereo / filterless audio fix afterward`n`n" +
+    "Your Discord account, settings, and login will NOT be removed.`n" +
+    "This only repairs program files and resolves voice module errors.`n`n" +
+    "Would you like to continue?",
+    "Repair Corrupted Discord Installation",
+    "YesNo",
+    "Question"
+)
             if ($confirmResult -ne "Yes") {
                 Add-Status $StatusBox $Form "Reinstall cancelled by user" "Yellow"
                 return $false

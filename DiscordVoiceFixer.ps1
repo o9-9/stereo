@@ -860,13 +860,26 @@ if ($Silent -or $CheckOnly) {
         }
     }
     if ($corruptedClients.Count -gt 0 -and $ic.Count -eq 0) {
+        # FIX #2: CheckOnly mode should report but NOT repair
+        if ($CheckOnly) {
+            Write-Host "[!] Detected $($corruptedClients.Count) corrupted Discord installation(s):"
+            foreach ($corrupt in $corruptedClients) {
+                Write-Host "    - $($corrupt.Client.Name.Trim()) at $($corrupt.Path)"
+            }
+            Write-Host ""
+            Write-Host "    Run without -CheckOnly flag to attempt automatic repair."
+            Write-Host "    Or run in GUI mode for guided repair."
+            exit 1
+        }
+        # Silent mode only: Actually perform repairs
         Write-Host "Detected $($corruptedClients.Count) corrupted Discord installation(s)"
         Write-Log "Detected $($corruptedClients.Count) corrupted Discord installation(s)"
         foreach ($corrupt in $corruptedClients) {
             Write-Host "Attempting to repair: $($corrupt.Client.Name.Trim())"
             $reinstallSuccess = $false
             try {
-                $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Update")
+                # FIX #3: Include mod client process names for thorough cleanup
+                $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
                 Stop-DiscordProcesses $allProcs | Out-Null
                 Start-Process "taskkill" -ArgumentList "/F","/IM","Discord*.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 2
@@ -880,7 +893,19 @@ if ($Silent -or $CheckOnly) {
                 elseif ($corrupt.Client.Name -match "Development") { $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=development&platform=win&arch=x64" }
                 $installerPath = Join-Path $env:TEMP "DiscordSetup_$(Get-Random).exe"
                 Write-Host "  Downloading Discord installer..."
-                Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+                # FIX #1 & #4: Validate installer download before running + cleanup on failure
+                try {
+                    Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+                    if (-not (Test-Path $installerPath)) { throw "Installer download failed - file not created" }
+                    $installerSize = (Get-Item $installerPath).Length / 1MB
+                    if ($installerSize -lt 1) { throw "Installer file is too small ($([math]::Round($installerSize, 2)) MB) - download may have failed" }
+                    Write-Host "  [OK] Downloaded installer ($([math]::Round($installerSize, 1)) MB)"
+                } catch {
+                    Write-Host "  [FAIL] Failed to download Discord installer: $($_.Exception.Message)"
+                    Write-Log "Silent mode installer download failed: $($_.Exception.Message)" "ERROR"
+                    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+                    continue
+                }
                 Write-Host "  Running installer..."
                 Start-Process $installerPath
                 # Wait for Discord to launch instead of waiting for installer to exit
@@ -1256,7 +1281,7 @@ $btnCheckUpdate.Add_Click({
                     if ($sc.Name -match "\[Official\]") {
                         Add-Status $statusBox $form "[?] Would you like to automatically reinstall Discord?" "Magenta"
                         $reinstallResult = Reinstall-DiscordClient -ClientPath $bp -ClientInfo $sc -StatusBox $statusBox -Form $form
-                        if ($reinstallResult) { Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Discord reinstalled! Now applying the stereo fix..." "Blue"; $form.Refresh(); Start-Sleep -Seconds 2; $btnFixAll.PerformClick() }
+                        if ($reinstallResult) { Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Waiting for Discord to stabilize..." "Cyan"; Start-Sleep -Seconds 5; Add-Status $statusBox $form "Discord reinstalled! Now applying the stereo fix..." "Blue"; $form.Refresh(); $btnFixAll.PerformClick() }
                     } else { Add-Status $statusBox $form "    Please manually reinstall $($sc.Name.Trim())" "Yellow" }
                 }
                 "NoVoiceModule" {
@@ -1433,7 +1458,7 @@ $btnStart.Add_Click({
                     if ($sc.Name -match "\[Official\]") {
                         Add-Status $statusBox $form "[X] No 'modules' folder found - Discord is corrupted" "Red"
                         $reinstallResult = Reinstall-DiscordClient -ClientPath $bp -ClientInfo $sc -StatusBox $statusBox -Form $form
-                        if ($reinstallResult) { $diag = Find-DiscordAppPath $bp -ReturnDiagnostics; if ($diag.Error) { throw "Discord reinstalled but still has issues." }; Add-Status $statusBox $form "Continuing with stereo fix..." "Blue" }
+                        if ($reinstallResult) { Start-Sleep -Seconds 3; $diag = Find-DiscordAppPath $bp -ReturnDiagnostics; if ($diag.Error) { throw "Discord reinstalled but still has issues." }; Add-Status $statusBox $form "Continuing with stereo fix..." "Blue" }
                         else { throw "Discord reinstallation was cancelled or failed." }
                     } else { throw "No 'modules' folder found in Discord. Please reinstall $($sc.Name.Trim()) manually." }
                 }

@@ -447,21 +447,32 @@ function Reinstall-DiscordClient {
             return $false
         }
         Add-Status $StatusBox $Form "Step 4/4: Running Discord installer..." "Blue"
-        Add-Status $StatusBox $Form "  Please wait for Discord to install and start..." "Yellow"
-        Add-Status $StatusBox $Form "  (This may take 1-2 minutes)" "Yellow"
-        try { Start-Process $installerPath -Wait; Add-Status $StatusBox $Form "[OK] Discord installer completed" "LimeGreen" }
+        Add-Status $StatusBox $Form "  Waiting for Discord to launch..." "Yellow"
+        try { 
+            Start-Process $installerPath
+            # Wait for Discord process to appear instead of waiting for installer to exit
+            $maxWait = 60; $waited = 0
+            while ($waited -lt $maxWait) {
+                Start-Sleep -Seconds 2; $waited += 2
+                if (Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" -ErrorAction SilentlyContinue) {
+                    Add-Status $StatusBox $Form "[OK] Discord is running" "LimeGreen"
+                    break
+                }
+                if ($null -ne $Form) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+        }
         catch { Add-Status $StatusBox $Form "[!] Installer may have encountered an issue: $($_.Exception.Message)" "Orange" }
         Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
         Add-Status $StatusBox $Form "" "White"
-        Add-Status $StatusBox $Form "Waiting for Discord to initialize..." "Blue"
-        Add-Status $StatusBox $Form "  Discord needs to download voice modules (this may take 30-60 seconds)" "Cyan"
+        Add-Status $StatusBox $Form "Waiting for voice modules to download..." "Blue"
         $maxWaitSeconds = 90; $waitedSeconds = 0; $voiceModuleFound = $false
         while ($waitedSeconds -lt $maxWaitSeconds) {
             Start-Sleep -Seconds 5; $waitedSeconds += 5
             $newDiag = Find-DiscordAppPath $ClientPath -ReturnDiagnostics
             if ($newDiag.VoiceModuleExists) { $voiceModuleFound = $true; Add-Status $StatusBox $Form "[OK] Voice module detected!" "LimeGreen"; break }
             $progressDots = "." * (($waitedSeconds / 5) % 4 + 1)
-            Add-Status $StatusBox $Form "  Waiting for modules$progressDots ($waitedSeconds/$maxWaitSeconds sec)" "Cyan"
+            Add-Status $StatusBox $Form "  Waiting$progressDots ($waitedSeconds sec)" "Cyan"
+            if ($null -ne $Form) { [System.Windows.Forms.Application]::DoEvents() }
         }
         if (-not $voiceModuleFound) {
             Add-Status $StatusBox $Form "[!] Voice module not detected after waiting" "Orange"
@@ -871,7 +882,13 @@ if ($Silent -or $CheckOnly) {
                 Write-Host "  Downloading Discord installer..."
                 Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
                 Write-Host "  Running installer..."
-                Start-Process $installerPath -Wait
+                Start-Process $installerPath
+                # Wait for Discord to launch instead of waiting for installer to exit
+                $waited = 0
+                while ($waited -lt 60) {
+                    Start-Sleep -Seconds 2; $waited += 2
+                    if (Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" -ErrorAction SilentlyContinue) { break }
+                }
                 Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
                 Write-Host "  Waiting for Discord to initialize..."
                 $waitedSeconds = 0

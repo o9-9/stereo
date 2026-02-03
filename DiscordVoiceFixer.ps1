@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # DISCORD VOICE FIXER - Stereo Audio Module Installer
 # ═══════════════════════════════════════════════════════════════════════════════
-# Usage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <name>] [-Help]
+# Usage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
@@ -20,9 +20,7 @@ if ([System.Environment]::OSVersion.Version.Major -ge 6) {
     } catch {}
 }
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region CONFIGURATION
-#region ══════════════════════════════════════════════════════════════════════════
 
 $Theme = @{
     Background=[System.Drawing.Color]::FromArgb(32,34,37); ControlBg=[System.Drawing.Color]::FromArgb(47,49,54)
@@ -70,9 +68,7 @@ $MAX_SETTINGS_BACKUPS = 5
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region UTILITY FUNCTIONS
-#region ══════════════════════════════════════════════════════════════════════════
 
 function EnsureDir($p) { if (-not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
 
@@ -114,7 +110,6 @@ function Save-Settings { param([PSCustomObject]$Settings)
     try { EnsureDir (Split-Path $SETTINGS_FILE -Parent); $Settings | ConvertTo-Json -Depth 5 | Out-File $SETTINGS_FILE -Force } catch { Write-Log "Failed to save settings: $($_.Exception.Message)" "ERROR" }
 }
 
-# Parse date with multiple format fallbacks
 function Parse-BackupDate {
     param([string]$DateString)
     if ([string]::IsNullOrWhiteSpace($DateString)) { return [DateTime]::MinValue }
@@ -136,11 +131,9 @@ function Safe-ParseDateTime {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
-#region BACKUP VALIDATION & VERIFICATION
-#region ══════════════════════════════════════════════════════════════════════════
+#region BACKUP VALIDATION & FIX VERIFICATION
 
-# Validate backup has required .node/.dll files
+# Validates backup has required .node/.dll files
 function Test-BackupHasContent {
     param([string]$BackupPath)
     $voiceModulePath = Join-Path $BackupPath "voice_module"
@@ -154,7 +147,7 @@ function Test-BackupHasContent {
     return @{ Valid = $true; FileCount = $files.Count; TotalSize = ($files | Measure-Object -Property Length -Sum).Sum }
 }
 
-# Compare MD5 hashes to verify stereo fix status
+# Compares MD5 hashes to verify if stereo fix is currently applied
 function Verify-StereoFix {
     param([string]$VoiceFolderPath, [string]$ClientName, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
@@ -203,7 +196,7 @@ function Verify-StereoFix {
     }
 }
 
-# Check all clients for Discord updates since last fix
+# Checks all clients for Discord updates since last fix
 function Get-UpdatedDiscordClients {
     $updatedClients = [System.Collections.ArrayList]@()
     $ic = Get-InstalledClients
@@ -225,9 +218,7 @@ function Get-UpdatedDiscordClients {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region UI HELPERS
-#region ══════════════════════════════════════════════════════════════════════════
 
 function New-StyledLabel {
     param([int]$X, [int]$Y, [int]$Width, [int]$Height, [string]$Text, [System.Drawing.Font]$Font=$Fonts.Normal,
@@ -276,11 +267,9 @@ function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar,
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region DISCORD PROCESS & PATH MANAGEMENT
-#region ══════════════════════════════════════════════════════════════════════════
 
-# Stop Discord processes (only kills Update.exe if in Discord directory)
+# Stops Discord processes (only kills Update.exe if in Discord directory)
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $discordProcesses = $ProcessNames | Where-Object { $_ -ne "Update" }
     $allProcesses = $discordProcesses + @("Update")
@@ -302,7 +291,7 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     return $true
 }
 
-# Find latest app-* folder with valid modules/voice structure
+# Finds latest app-* folder with valid modules/voice structure
 function Find-DiscordAppPath { 
     param([string]$BasePath, [switch]$ReturnDiagnostics)
     $af = Get-ChildItem $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue | 
@@ -356,7 +345,7 @@ function Get-PathFromShortcuts { param([string]$ShortcutName)
     return $null
 }
 
-# Resolve actual client path from config, running process, or shortcuts
+# Resolves actual client path from config, running process, or shortcuts
 function Get-RealClientPath { param($ClientObj)
     $p = $ClientObj.Path
     if (Test-Path $p) { return $p }
@@ -366,7 +355,7 @@ function Get-RealClientPath { param($ClientObj)
     return $null
 }
 
-# Scan system for all installed Discord clients with valid voice modules
+# Scans system for all installed Discord clients with valid voice modules
 function Get-InstalledClients {
     $inst = [System.Collections.ArrayList]@()
     $foundPaths = [System.Collections.Generic.HashSet[string]]@()
@@ -388,12 +377,11 @@ function Get-InstalledClients {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
-#region DISCORD REINSTALL (for corrupted installations)
-#region ══════════════════════════════════════════════════════════════════════════
+#region DISCORD REINSTALL
 
 $script:DiscordWasReinstalled = $false
 
+# Reinstalls corrupted Discord installations (official clients only)
 function Reinstall-DiscordClient {
     param(
         [string]$ClientPath,
@@ -402,16 +390,13 @@ function Reinstall-DiscordClient {
         [System.Windows.Forms.Form]$Form,
         [switch]$SkipConfirmation
     )
-
     try {
         $clientName = $ClientInfo.Name
-
         if ($clientName -notmatch "\[Official\]") {
             Add-Status $StatusBox $Form "[X] Automatic reinstall only supported for official Discord clients" "Red"
             Add-Status $StatusBox $Form "    Please manually reinstall $clientName" "Yellow"
             return $false
         }
-
         $discordVariant = "stable"
         $setupUrl = $DISCORD_SETUP_URL
         if ($clientName -match "Canary") {
@@ -424,67 +409,54 @@ function Reinstall-DiscordClient {
             $discordVariant = "development"
             $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=development&platform=win&arch=x64"
         }
-
         Add-Status $StatusBox $Form "" "White"
         Add-Status $StatusBox $Form "=== DISCORD REINSTALL ($discordVariant) ===" "Magenta"
         Add-Status $StatusBox $Form "Your Discord installation is missing the modules folder." "Yellow"
         Add-Status $StatusBox $Form "This usually means Discord is corrupted or very outdated." "Yellow"
-
         if (-not $SkipConfirmation) {
-      $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-    $Form,
-    "Discord appears to be corrupted because its internal 'modules' folder is missing.`n`n" +
-    "This folder is required for Discord's voice system to function correctly.`n`n" +
-    "To fix this, the installer will perform a safe automatic repair by:`n" +
-    "• Fully closing Discord`n" +
-    "• Removing the broken Discord app files`n" +
-    "• Downloading and installing the latest official Discord version`n" +
-    "• Allowing Discord to rebuild its missing voice modules`n" +
-    "• Applying the stereo / filterless audio fix afterward`n`n" +
-    "Your Discord account, settings, and login will NOT be removed.`n" +
-    "This only repairs program files and resolves voice module errors.`n`n" +
-    "Would you like to continue?",
-    "Repair Corrupted Discord Installation",
-    "YesNo",
-    "Question"
-)
+            $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+                $Form,
+                "Discord appears to be corrupted because its internal 'modules' folder is missing.`n`n" +
+                "This folder is required for Discord's voice system to function correctly.`n`n" +
+                "To fix this, the installer will perform a safe automatic repair by:`n" +
+                "• Fully closing Discord`n" +
+                "• Removing the broken Discord app files`n" +
+                "• Downloading and installing the latest official Discord version`n" +
+                "• Allowing Discord to rebuild its missing voice modules`n" +
+                "• Applying the stereo / filterless audio fix afterward`n`n" +
+                "Your Discord account, settings, and login will NOT be removed.`n" +
+                "This only repairs program files and resolves voice module errors.`n`n" +
+                "Would you like to continue?",
+                "Repair Corrupted Discord Installation",
+                "YesNo",
+                "Question"
+            )
             if ($confirmResult -ne "Yes") {
                 Add-Status $StatusBox $Form "Reinstall cancelled by user" "Yellow"
                 return $false
             }
         }
-
-        # ✅ mark reinstall
         $script:DiscordWasReinstalled = $true
-
         Add-Status $StatusBox $Form "Step 1/4: Closing all Discord processes..." "Blue"
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         Stop-DiscordProcesses $allProcs | Out-Null
         Start-Sleep -Seconds 2
         Add-Status $StatusBox $Form "[OK] Discord processes terminated" "LimeGreen"
-
         Add-Status $StatusBox $Form "Step 2/4: Removing corrupted Discord files..." "Blue"
         Get-ChildItem $ClientPath -Filter "app-*" -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-
         $updateExe = Join-Path $ClientPath "Update.exe"
         if (Test-Path $updateExe) { Remove-Item $updateExe -Force -ErrorAction SilentlyContinue }
-
         Add-Status $StatusBox $Form "[OK] Corrupted files removed" "LimeGreen"
-
         Add-Status $StatusBox $Form "Step 3/4: Downloading Discord installer..." "Blue"
         $installerPath = Join-Path $env:TEMP "DiscordSetup_$([guid]::NewGuid()).exe"
         Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
-
         Add-Status $StatusBox $Form "Step 4/4: Running Discord installer..." "Blue"
         Start-Process $installerPath
-
         Add-Status $StatusBox $Form "Waiting for voice modules to download..." "Blue"
-
         $maxWait = 90
         $waited = 0
         $voiceModuleFound = $false
-
         while ($waited -lt $maxWait) {
             Start-Sleep -Seconds 5
             $waited += 5
@@ -495,19 +467,13 @@ function Reinstall-DiscordClient {
                 break
             }
         }
-
         if (-not $voiceModuleFound) {
             Add-Status $StatusBox $Form "[!] Voice module not detected after reinstall" "Orange"
             return $false
         }
-
-        # ✅ release lock ONLY after reinstall
         if ($script:DiscordWasReinstalled) {
             Add-Status $StatusBox $Form "Reinstall detected - releasing voice module lock..." "Cyan"
-
-            Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" `
-                -ErrorAction SilentlyContinue | Stop-Process -Force
-
+            Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" -ErrorAction SilentlyContinue | Stop-Process -Force
             $voiceNodePath = Join-Path $newDiag.VoiceModulePath "discord_voice.node"
             for ($i = 0; $i -lt 10; $i++) {
                 try {
@@ -518,13 +484,10 @@ function Reinstall-DiscordClient {
                     Start-Sleep -Seconds 1
                 }
             }
-
             Add-Status $StatusBox $Form "[OK] Voice module released" "LimeGreen"
         }
-
         Add-Status $StatusBox $Form "[OK] Discord reinstallation completed successfully!" "LimeGreen"
         return $true
-
     } catch {
         Add-Status $StatusBox $Form "[X] Reinstall failed: $($_.Exception.Message)" "Red"
         return $false
@@ -533,11 +496,9 @@ function Reinstall-DiscordClient {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region DOWNLOAD & EQ APO FIX
-#region ══════════════════════════════════════════════════════════════════════════
 
-# Download voice backup files from GitHub
+# Downloads voice backup files from GitHub
 function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
         EnsureDir $DestinationPath
@@ -569,7 +530,7 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
     } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; Write-Log "Download failed: $($_.Exception.Message)" "ERROR"; return $false }
 }
 
-# Replace Discord settings.json with EQ APO compatible version
+# Replaces Discord settings.json with EQ APO compatible version
 function Apply-EqApoFix {
     param([string]$RoamingPath, [string]$ClientName, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [bool]$SkipConfirmation = $false)
     try {
@@ -645,9 +606,7 @@ function Apply-EqApoFixAll {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region BACKUP MANAGEMENT
-#region ══════════════════════════════════════════════════════════════════════════
 
 function Initialize-BackupDirectory { EnsureDir $BACKUP_ROOT; EnsureDir $ORIGINAL_BACKUP_ROOT; EnsureDir (Split-Path $STATE_FILE -Parent) }
 function Get-StateData { if (Test-Path $STATE_FILE) { try { return Get-Content $STATE_FILE -Raw | ConvertFrom-Json } catch { return $null } }; return $null }
@@ -679,7 +638,7 @@ function Get-OriginalBackup { param([string]$ClientName)
     return $null
 }
 
-# Create permanent backup of original voice modules (never auto-deleted)
+# Creates permanent backup of original voice modules (never auto-deleted)
 function Create-OriginalBackup {
     param([string]$VoiceFolderPath, [string]$ClientName, [string]$AppVersion, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
@@ -710,7 +669,7 @@ function Create-OriginalBackup {
     } catch { Add-Status $StatusBox $Form "[!] Original backup failed: $($_.Exception.Message)" "Orange"; Write-Log "Original backup failed: $($_.Exception.Message)" "ERROR"; return $null }
 }
 
-# Create timestamped backup before applying fix (rotated, keeps 1 per client)
+# Creates timestamped backup before applying fix (rotated, keeps 1 per client)
 function Create-VoiceBackup { 
     param([string]$VoiceFolderPath, [string]$ClientName, [string]$AppVersion, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
@@ -736,7 +695,7 @@ function Create-VoiceBackup {
     } catch { Add-Status $StatusBox $Form "[!] Backup failed: $($_.Exception.Message)" "Orange"; Write-Log "Backup failed: $($_.Exception.Message)" "ERROR"; return $null }
 }
 
-# Get all valid backups (original + rotated) with metadata
+# Gets all valid backups (original + rotated) with metadata
 function Get-AvailableBackups {
     param([System.Windows.Forms.RichTextBox]$StatusBox = $null, [System.Windows.Forms.Form]$Form = $null)
     Initialize-BackupDirectory
@@ -780,7 +739,7 @@ function Get-AvailableBackups {
     return ,$bks.ToArray()
 }
 
-# Restore voice module from backup to target Discord installation
+# Restores voice module from backup to target Discord installation
 function Restore-FromBackup {
     param([hashtable]$Backup, [string]$TargetVoicePath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
     try {
@@ -801,7 +760,7 @@ function Restore-FromBackup {
     } catch { Add-Status $StatusBox $Form "[X] Restore failed: $($_.Exception.Message)" "Red"; Write-Log "Restore failed: $($_.Exception.Message)" "ERROR"; return $false }
 }
 
-# Remove old backups keeping only most recent per client
+# Removes old backups keeping only most recent per client
 function Remove-OldBackups {
     $bfs = Get-ChildItem $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue
     $byClient = @{}
@@ -826,11 +785,9 @@ function Remove-OldBackups {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region VERSION CHECK & UPDATE
-#region ══════════════════════════════════════════════════════════════════════════
 
-# Check if Discord was updated since last fix
+# Checks if Discord was updated since last fix by comparing versions
 function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
     $st = Get-StateData; if (-not $st) { return $null }
     $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
@@ -844,6 +801,7 @@ function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
     return @{Updated=$false; CurrentVersion=$cv; LastFixDate=$null}
 }
 
+# Saves fix state (version and timestamp) for tracking updates
 function Save-FixState { param([string]$ClientName, [string]$Version)
     Initialize-BackupDirectory
     $st = Get-StateData; if (-not $st) { $st = @{} }
@@ -888,9 +846,7 @@ function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$Current
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region SILENT MODE
-#region ══════════════════════════════════════════════════════════════════════════
 
 if ($Silent -or $CheckOnly) {
     Write-Log "Starting in $(if($Silent){'Silent'}else{'CheckOnly'}) mode"
@@ -906,7 +862,6 @@ if ($Silent -or $CheckOnly) {
         }
     }
     if ($corruptedClients.Count -gt 0 -and $ic.Count -eq 0) {
-        # FIX #2: CheckOnly mode should report but NOT repair
         if ($CheckOnly) {
             Write-Host "[!] Detected $($corruptedClients.Count) corrupted Discord installation(s):"
             foreach ($corrupt in $corruptedClients) {
@@ -917,14 +872,12 @@ if ($Silent -or $CheckOnly) {
             Write-Host "    Or run in GUI mode for guided repair."
             exit 1
         }
-        # Silent mode only: Actually perform repairs
         Write-Host "Detected $($corruptedClients.Count) corrupted Discord installation(s)"
         Write-Log "Detected $($corruptedClients.Count) corrupted Discord installation(s)"
         foreach ($corrupt in $corruptedClients) {
             Write-Host "Attempting to repair: $($corrupt.Client.Name.Trim())"
             $reinstallSuccess = $false
             try {
-                # FIX #3: Include mod client process names for thorough cleanup
                 $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
                 Stop-DiscordProcesses $allProcs | Out-Null
                 Start-Process "taskkill" -ArgumentList "/F","/IM","Discord*.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
@@ -939,7 +892,6 @@ if ($Silent -or $CheckOnly) {
                 elseif ($corrupt.Client.Name -match "Development") { $setupUrl = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=development&platform=win&arch=x64" }
                 $installerPath = Join-Path $env:TEMP "DiscordSetup_$(Get-Random).exe"
                 Write-Host "  Downloading Discord installer..."
-                # FIX #1 & #4: Validate installer download before running + cleanup on failure
                 try {
                     Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
                     if (-not (Test-Path $installerPath)) { throw "Installer download failed - file not created" }
@@ -954,7 +906,6 @@ if ($Silent -or $CheckOnly) {
                 }
                 Write-Host "  Running installer..."
                 Start-Process $installerPath
-                # Wait for Discord to launch instead of waiting for installer to exit
                 $waited = 0
                 while ($waited -lt 60) {
                     Start-Sleep -Seconds 2; $waited += 2
@@ -1088,9 +1039,7 @@ if ($Silent -or $CheckOnly) {
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region GUI MODE
-#region ══════════════════════════════════════════════════════════════════════════
 
 Write-Log "Starting in GUI mode"
 $settings = Load-Settings
@@ -1184,11 +1133,8 @@ $btnOpenBackups.Add_Click({ Initialize-BackupDirectory; Start-Process "explorer.
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region BUTTON HANDLERS
-#region ══════════════════════════════════════════════════════════════════════════
 
-# --- btnVerify: Check if stereo fix is currently active ---
 $btnVerify.Add_Click({
     $btnVerify.Enabled = $false; $statusBox.Clear(); $progressBar.Value = 0
     try {
@@ -1251,7 +1197,6 @@ $btnVerify.Add_Click({
     }
 })
 
-# --- btnFixEqApo: Apply EQ APO fix only ---
 $btnFixEqApo.Add_Click({
     $btnFixEqApo.Enabled = $false; $statusBox.Clear(); $progressBar.Value = 0
     try {
@@ -1287,7 +1232,6 @@ $btnFixEqApo.Add_Click({
     finally { $btnFixEqApo.Enabled = $true }
 })
 
-# --- clientCombo: Update status when client selection changes ---
 $clientCombo.Add_SelectedIndexChanged({
     $idx = $clientCombo.SelectedIndex
     if ($idx -lt 0 -or $idx -ge $DiscordClients.Count) { $updateStatusLabel.Text = "Invalid selection"; $updateStatusLabel.ForeColor = $Theme.TextDim; return }
@@ -1303,7 +1247,6 @@ $clientCombo.Add_SelectedIndexChanged({
     else { $updateStatusLabel.Text = "" }
 })
 
-# --- btnCheckUpdate: Check Discord version and installation status ---
 $btnCheckUpdate.Add_Click({
     $btnCheckUpdate.Enabled = $false; $statusBox.Clear(); $progressBar.Value = 0
     try {
@@ -1348,234 +1291,313 @@ $btnCheckUpdate.Add_Click({
         $uc = Check-DiscordUpdated $bp $sc.Name
         if ($uc -and $uc.Updated) {
             Add-Status $statusBox $form "[!] Discord has been updated!" "Yellow"
-            Add-Status $statusBox $form "    Previous: v$($uc.OldVersion)" "Orange"; Add-Status $statusBox $form "    Current:  v$($uc.NewVersion)" "Orange"
-            Add-Status $statusBox $form "    Re-applying the fix is recommended." "Yellow"
-            $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning
+            Add-Status $statusBox $form "    Previous fixed: v$($uc.OldVersion)" "Cyan"
+            Add-Status $statusBox $form "    Current: v$($uc.NewVersion)" "Cyan"
+            Add-Status $statusBox $form "    Re-running the fix is recommended." "Cyan"
+            $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"
+            $updateStatusLabel.ForeColor = $Theme.Warning
         } elseif ($uc -and $uc.LastFixDate) {
             $lf = Safe-ParseDateTime $uc.LastFixDate
             if ($lf) {
-                Add-Status $statusBox $form "[OK] No update detected since last fix" "LimeGreen"
+                Add-Status $statusBox $form "[OK] No update detected" "LimeGreen"
+                Add-Status $statusBox $form "    Version: v$($uc.CurrentVersion)" "Cyan"
                 Add-Status $statusBox $form "    Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
-                $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
+                $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"
+                $updateStatusLabel.ForeColor = $Theme.TextSecondary
             } else {
-                Add-Status $statusBox $form "[OK] No update detected since last fix" "LimeGreen"
-                $updateStatusLabel.Text = "Last fixed: unknown date (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
+                Add-Status $statusBox $form "[OK] No update detected" "LimeGreen"
+                Add-Status $statusBox $form "    Version: v$($uc.CurrentVersion)" "Cyan"
             }
-        } else { Add-Status $statusBox $form "[!] No previous fix recorded for this client" "Yellow"; Add-Status $statusBox $form "    Run 'Start Fix' to apply the fix." "Cyan"; $updateStatusLabel.Text = "" }
-        Update-Progress $progressBar $form 90
-        if (Test-OriginalBackupExists $sc.Name) {
-            $orig = Get-OriginalBackup $sc.Name
-            if ($orig) { Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[ORIGINAL BACKUP] Preserved from: $($orig.BackupDate.ToString('MMM dd, yyyy HH:mm'))" "Magenta" }
-        } else { Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[INFO] No original backup yet - will be created on first fix" "Yellow" }
+        } else {
+            Add-Status $statusBox $form "[?] Client has never been fixed" "Yellow"
+            Add-Status $statusBox $form "    Version: v$cv" "Cyan"
+            Add-Status $statusBox $form "    Run 'Start Fix' or 'Fix All' to apply the stereo fix." "Cyan"
+        }
         Update-Progress $progressBar $form 100
     } catch {
-        Add-Status $statusBox $form "[X] Check error: $($_.Exception.Message)" "Red"
+        Add-Status $statusBox $form "[X] Check failed: $($_.Exception.Message)" "Red"
         Write-Log "Check error: $($_.Exception.Message)" "ERROR"
     } finally {
         $btnCheckUpdate.Enabled = $true
     }
 })
 
-# --- btnRollback: Restore from backup ---
 $btnRollback.Add_Click({
-    $statusBox.Clear(); $progressBar.Value = 0
-    $idx = $clientCombo.SelectedIndex
-    if ($idx -lt 0 -or $idx -ge $DiscordClients.Count) { Add-Status $statusBox $form "[X] Invalid client selection" "Red"; return }
-    $sc = $DiscordClients[$idx]
-    Add-Status $statusBox $form "Loading available backups..." "Blue"
-    if (-not (Test-Path $BACKUP_ROOT) -and -not (Test-Path $ORIGINAL_BACKUP_ROOT)) {
-        Add-Status $statusBox $form "[X] No backup directories found" "Red"
-        Add-Status $statusBox $form "You need to run the installer (Start Fix or Fix All) first." "Yellow"
-        Add-Status $statusBox $form "Backup location: $APP_DATA_ROOT" "Cyan"
-        [System.Windows.Forms.MessageBox]::Show($form,"No backups available.`n`nYou need to run 'Start Fix' or 'Fix All' first to create a backup.","No Backups Found","OK","Information")
-        return
-    }
-    $bks = @(Get-AvailableBackups $statusBox $form)
-    if ($bks.Count -eq 0) { 
-        Add-Status $statusBox $form "[X] No valid backups found" "Red"
-        Add-Status $statusBox $form "Backup locations checked:" "Cyan"
-        Add-Status $statusBox $form "  Regular backups: $BACKUP_ROOT" "Cyan"
-        Add-Status $statusBox $form "  Original backups: $ORIGINAL_BACKUP_ROOT" "Cyan"
-        [System.Windows.Forms.MessageBox]::Show($form,"No valid backups available.`n`nRun 'Start Fix' or 'Fix All' first to create a backup.","No Valid Backups","OK","Information")
-        return 
-    }
-    Add-Status $statusBox $form "[OK] Found $($bks.Count) valid backup(s)" "LimeGreen"
-    $rf = New-Object System.Windows.Forms.Form
-    $rf.Text = "Select Backup to Restore"; $rf.Size = New-Object System.Drawing.Size(500,350); $rf.StartPosition = "CenterParent"
-    $rf.FormBorderStyle = "FixedDialog"; $rf.MaximizeBox = $false; $rf.MinimizeBox = $false; $rf.BackColor = $Theme.Background; $rf.TopMost = $true
-    $infoLabel = New-StyledLabel 20 10 445 40 "[ORIGINAL] backups are preserved forever and let you revert to mono audio.`nRegular backups are rotated (1 kept per client)." $Fonts.Small $Theme.TextSecondary "TopLeft"
-    $rf.Controls.Add($infoLabel)
-    $lb = New-Object System.Windows.Forms.ListBox
-    $lb.Location = New-Object System.Drawing.Point(20,55); $lb.Size = New-Object System.Drawing.Size(445,180)
-    $lb.BackColor = $Theme.ControlBg; $lb.ForeColor = $Theme.TextPrimary; $lb.Font = $Fonts.Normal
-    foreach ($b in $bks) { [void]$lb.Items.Add($b.DisplayName) }; $lb.SelectedIndex = 0; $rf.Controls.Add($lb)
-    $br = New-StyledButton 145 250 100 35 "Restore"; $bc = New-StyledButton 255 250 100 35 "Cancel" $Fonts.Button $Theme.Secondary
-    $rf.Controls.Add($br); $rf.Controls.Add($bc)
-    $bc.Add_Click({ $rf.DialogResult = "Cancel"; $rf.Close() }); $br.Add_Click({ $rf.DialogResult = "OK"; $rf.Close() })
-    $res = $rf.ShowDialog($form)
-    if ($res -eq "OK" -and $lb.SelectedIndex -ge 0 -and $lb.SelectedIndex -lt $bks.Count) {
-        $btnRollback.Enabled = $false; $btnStart.Enabled = $false; $btnFixAll.Enabled = $false
-        try {
-            $sb = $bks[$lb.SelectedIndex]
-            if (-not $sb -or -not $sb.Path -or -not (Test-Path $sb.Path)) { Add-Status $statusBox $form "[X] Backup folder no longer exists" "Red"; return }
-            if ($sb.IsOriginal) {
-                $confirmOrig = [System.Windows.Forms.MessageBox]::Show($form, "You are about to restore the ORIGINAL backup.`n`nThis will revert Discord to MONO audio (pre-stereo fix).`n`nAre you sure?", "Restore Original (Mono)?", "YesNo", "Warning")
-                if ($confirmOrig -ne "Yes") { Add-Status $statusBox $form "Restore cancelled by user" "Yellow"; return }
-            }
-            Add-Status $statusBox $form "Starting rollback..." "Blue"
-            Add-Status $statusBox $form "  Selected: $($sb.DisplayName)" "Cyan"
-            Update-Progress $progressBar $form 20
-            Add-Status $statusBox $form "Closing Discord processes..." "Blue"
-            $stopResult = Stop-DiscordProcesses $sc.Processes
-            if (-not $stopResult) { Add-Status $statusBox $form "[!] Warning: Some processes may still be running" "Orange"; Start-Sleep -Seconds 2 }
-            Update-Progress $progressBar $form 40
-            $bp = Get-RealClientPath $sc
-            if (-not $bp) { Add-Status $statusBox $form "[X] Could not find Discord installation" "Red"; return }
-            $ap = Find-DiscordAppPath $bp
-            if (-not $ap) { Add-Status $statusBox $form "[X] Could not find Discord app folder" "Red"; return }
-            $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-            if (-not $vm) { Add-Status $statusBox $form "[X] Could not find voice module in Discord installation" "Red"; return }
-            $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-            Update-Progress $progressBar $form 60
-            $suc = Restore-FromBackup $sb $tvf $statusBox $form
-            Update-Progress $progressBar $form 80
-            if ($suc) {
-                if ($sb.IsOriginal) { Add-Status $statusBox $form "[OK] Restored to ORIGINAL (mono audio)" "Magenta" }
-                else { Add-Status $statusBox $form "[OK] Rollback completed successfully" "LimeGreen" }
-                if ($chkAutoStart.Checked) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; Start-DiscordClient $de; Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
-                Update-Progress $progressBar $form 100
-                Play-CompletionSound $true; [System.Windows.Forms.MessageBox]::Show($form,"Rollback completed successfully!","Success","OK","Information")
-            } else { Play-CompletionSound $false }
-        } catch {
-            Add-Status $statusBox $form "[X] Rollback error: $($_.Exception.Message)" "Red"
-            Write-Log "Rollback error: $($_.Exception.Message)" "ERROR"
-            Play-CompletionSound $false
-        } finally {
-            $btnRollback.Enabled = $true; $btnStart.Enabled = $true; $btnFixAll.Enabled = $true
+    $btnRollback.Enabled = $false; $statusBox.Clear(); $progressBar.Value = 0
+    try {
+        $idx = $clientCombo.SelectedIndex
+        if ($idx -lt 0 -or $idx -ge $DiscordClients.Count) { Add-Status $statusBox $form "[X] Invalid client selection" "Red"; return }
+        $sc = $DiscordClients[$idx]
+        Add-Status $statusBox $form "=== ROLLBACK ===" "Blue"
+        Add-Status $statusBox $form "Client: $($sc.Name.Trim())" "Cyan"
+        Update-Progress $progressBar $form 10
+        $bp = Get-RealClientPath $sc
+        if (-not $bp) { Add-Status $statusBox $form "[X] Discord client not found" "Red"; return }
+        $ap = Find-DiscordAppPath $bp
+        if (-not $ap) { Add-Status $statusBox $form "[X] Could not find Discord app folder" "Red"; return }
+        $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $vm) { Add-Status $statusBox $form "[X] No voice module found" "Red"; return }
+        $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
+        Update-Progress $progressBar $form 20
+        Add-Status $statusBox $form "Scanning available backups..." "Blue"
+        $backups = Get-AvailableBackups $statusBox $form
+        if (-not $backups -or $backups.Count -eq 0) { Add-Status $statusBox $form "[X] No backups found" "Red"; Add-Status $statusBox $form "    You need to run the fix at least once to create a backup." "Yellow"; return }
+        $origBackup = Get-OriginalBackup $sc.Name
+        Update-Progress $progressBar $form 30
+        $backupForm = New-Object System.Windows.Forms.Form
+        $backupForm.Text = "Select Backup to Restore"; $backupForm.Size = New-Object System.Drawing.Size(500,400)
+        $backupForm.StartPosition = "CenterParent"; $backupForm.BackColor = $Theme.Background
+        $backupForm.FormBorderStyle = "FixedDialog"; $backupForm.MaximizeBox = $false
+        $lblSelect = New-StyledLabel 20 15 440 25 "Select a backup to restore:" $Fonts.Normal $Theme.TextPrimary
+        $backupForm.Controls.Add($lblSelect)
+        $listBackups = New-Object System.Windows.Forms.ListBox
+        $listBackups.Location = New-Object System.Drawing.Point(20,45); $listBackups.Size = New-Object System.Drawing.Size(440,250)
+        $listBackups.BackColor = $Theme.ControlBg; $listBackups.ForeColor = $Theme.TextPrimary
+        $listBackups.Font = $Fonts.Console
+        foreach ($b in $backups) { [void]$listBackups.Items.Add($b.DisplayName) }
+        $backupForm.Controls.Add($listBackups)
+        $btnRestore = New-StyledButton 20 310 200 35 "Restore Selected" $Fonts.Button $Theme.Primary
+        $btnCancel = New-StyledButton 240 310 200 35 "Cancel" $Fonts.Button $Theme.Secondary
+        $backupForm.Controls.Add($btnRestore); $backupForm.Controls.Add($btnCancel)
+        $script:selectedBackup = $null
+        $btnRestore.Add_Click({
+            if ($listBackups.SelectedIndex -ge 0) { $script:selectedBackup = $backups[$listBackups.SelectedIndex]; $backupForm.DialogResult = "OK"; $backupForm.Close() }
+            else { [System.Windows.Forms.MessageBox]::Show($backupForm, "Please select a backup first.", "No Selection", "OK", "Warning") }
+        })
+        $btnCancel.Add_Click({ $backupForm.DialogResult = "Cancel"; $backupForm.Close() })
+        $result = $backupForm.ShowDialog($form)
+        if ($result -ne "OK" -or -not $script:selectedBackup) { Add-Status $statusBox $form "Rollback cancelled" "Yellow"; return }
+        Update-Progress $progressBar $form 40
+        $sb = $script:selectedBackup
+        if ($sb.IsOriginal) {
+            $confirmResult = [System.Windows.Forms.MessageBox]::Show($form, "You are about to restore the ORIGINAL Discord voice modules.`n`nThis will REVERT to mono audio.`n`nAre you sure you want to continue?", "Confirm Restore Original", "YesNo", "Warning")
+            if ($confirmResult -ne "Yes") { Add-Status $statusBox $form "Rollback cancelled" "Yellow"; return }
         }
+        Add-Status $statusBox $form "Selected backup: $($sb.DisplayName)" "Cyan"
+        Update-Progress $progressBar $form 50
+        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
+        $stopResult = Stop-DiscordProcesses $allProcs
+        if (-not $stopResult) { Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"; Start-Sleep -Seconds 2 }
+        Start-Sleep -Seconds 1
+        Update-Progress $progressBar $form 70
+        Add-Status $statusBox $form "Restoring backup..." "Blue"
+        $restoreResult = Restore-FromBackup $sb $tvf $statusBox $form
+        if (-not $restoreResult) { Add-Status $statusBox $form "[X] Restore failed" "Red"; return }
+        Update-Progress $progressBar $form 90
+        if ($chkAutoStart.Checked) {
+            Add-Status $statusBox $form "Starting Discord..." "Blue"
+            $de = Join-Path $ap $sc.Exe
+            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+        }
+        Update-Progress $progressBar $form 100
+        Add-Status $statusBox $form "" "White"
+        if ($sb.IsOriginal) { Add-Status $statusBox $form "[OK] Rollback complete - ORIGINAL modules restored (mono audio)" "Magenta" }
+        else { Add-Status $statusBox $form "[OK] Rollback complete!" "LimeGreen" }
+        Play-CompletionSound $true
+    } catch {
+        Add-Status $statusBox $form "[X] Rollback failed: $($_.Exception.Message)" "Red"
+        Write-Log "Rollback error: $($_.Exception.Message)" "ERROR"
+        Play-CompletionSound $false
+    } finally {
+        $btnRollback.Enabled = $true
     }
 })
 
-# --- btnStart: Fix selected client ---
 $btnStart.Add_Click({
     $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false; $btnFixEqApo.Enabled = $false
-    $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    $statusBox.Clear(); $progressBar.Value = 0
+    $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
     try {
         $idx = $clientCombo.SelectedIndex
-        if ($idx -lt 0 -or $idx -ge $DiscordClients.Count) { throw "Invalid client selection" }
+        if ($idx -lt 0 -or $idx -ge $DiscordClients.Count) { Add-Status $statusBox $form "[X] Invalid client selection" "Red"; return }
         $sc = $DiscordClients[$idx]
-        if ($chkUpdate.Checked) {
-            Add-Status $statusBox $form "Checking for script updates..." "Blue"; Update-Progress $progressBar $form 5
-            try {
-                $cs = $PSCommandPath
-                if ([string]::IsNullOrEmpty($cs)) { Add-Status $statusBox $form "[OK] Running latest version from web" "LimeGreen" }
-                else {
-                    $uf = "$env:TEMP\StereoInstaller_Update_$(Get-Random).ps1"
-                    Invoke-WebRequest -Uri $UPDATE_URL -OutFile $uf -UseBasicParsing -TimeoutSec 10 | Out-Null
-                    $ucontent = (Get-Content $uf -Raw) -replace "`r`n","`n" -replace "`r","`n"
-                    $ccontent = (Get-Content $cs -Raw) -replace "`r`n","`n" -replace "`r","`n"
-                    if ($ucontent -and $ccontent) {
-                        $ucontent = $ucontent.Trim(); $ccontent = $ccontent.Trim()
-                        if ($ucontent -ne $ccontent) {
-                            Add-Status $statusBox $form "New update found!" "Yellow"
-                            if ($chkAutoUpdate.Checked) {
-                                Add-Status $statusBox $form "Update will be applied after script closes..." "Cyan"
-                                Add-Status $statusBox $form "[OK] Update prepared! Restarting in 3 seconds..." "LimeGreen"
-                                Start-Sleep -Seconds 3; Apply-ScriptUpdate $uf $cs; $form.Close(); return
-                            } else { Add-Status $statusBox $form "Update downloaded to: $uf" "Orange" }
-                        } else { Add-Status $statusBox $form "[OK] You are on the latest version" "LimeGreen"; Remove-Item $uf -ErrorAction SilentlyContinue }
-                    } else { Add-Status $statusBox $form "[!] Could not read script files for comparison" "Orange"; Remove-Item $uf -ErrorAction SilentlyContinue }
-                }
-            } catch { Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange" }
-        }
-        Update-Progress $progressBar $form 10; Add-Status $statusBox $form "Downloading required files from GitHub..." "Blue"; EnsureDir $td
-        $vbp = Join-Path $td "VoiceBackup"
-        $vds = Download-VoiceBackupFiles $vbp $statusBox $form
-        if (-not $vds) { throw "Failed to download voice backup files from GitHub" }
-        Add-Status $statusBox $form "[OK] Files downloaded successfully" "LimeGreen"; Update-Progress $progressBar $form 30
-        Add-Status $statusBox $form "Locating Discord installation..." "Blue"
-        $bp = Get-RealClientPath $sc; if (-not $bp) { throw "Discord client folder not found. Please ensure it is installed or run Discord so we can detect the path." }
-        Add-Status $statusBox $form "Path detected: $bp" "Cyan"
+        Add-Status $statusBox $form "=== STARTING FIX ===" "Blue"
+        Add-Status $statusBox $form "Client: $($sc.Name.Trim())" "Cyan"
+        Update-Progress $progressBar $form 5
+        $bp = Get-RealClientPath $sc
+        if (-not $bp) { Add-Status $statusBox $form "[X] Discord client not found" "Red"; Add-Status $statusBox $form "    Try opening Discord first so we can detect the path." "Yellow"; return }
+        Add-Status $statusBox $form "Found: $bp" "Cyan"
+        Update-Progress $progressBar $form 10
         $diag = Find-DiscordAppPath $bp -ReturnDiagnostics
         if ($diag.Error) {
             switch ($diag.Error) {
-                "NoAppFolders" { throw "No Discord app folders found. Discord may not be fully installed. Try running Discord once." }
-                "NoModulesFolder" { 
+                "NoAppFolders" { Add-Status $statusBox $form "[X] No Discord app folders found" "Red" }
+                "NoModulesFolder" {
+                    Add-Status $statusBox $form "[X] No 'modules' folder found - Discord may be corrupted" "Red"
                     if ($sc.Name -match "\[Official\]") {
-                        Add-Status $statusBox $form "[X] No 'modules' folder found - Discord is corrupted" "Red"
                         $reinstallResult = Reinstall-DiscordClient -ClientPath $bp -ClientInfo $sc -StatusBox $statusBox -Form $form
-                        if ($reinstallResult) { Start-Sleep -Seconds 3; $diag = Find-DiscordAppPath $bp -ReturnDiagnostics; if ($diag.Error) { throw "Discord reinstalled but still has issues." }; Add-Status $statusBox $form "Continuing with stereo fix..." "Blue" }
-                        else { throw "Discord reinstallation was cancelled or failed." }
-                    } else { throw "No 'modules' folder found in Discord. Please reinstall $($sc.Name.Trim()) manually." }
+                        if ($reinstallResult) { $diag = Find-DiscordAppPath $bp -ReturnDiagnostics }
+                        else { return }
+                    } else { Add-Status $statusBox $form "    Please manually reinstall $($sc.Name.Trim())" "Yellow"; return }
                 }
-                "NoVoiceModule" { throw "No 'discord_voice' module found. Try joining a voice channel first, then run this fix again." }
-                default { throw "Could not find Discord installation structure." }
+                "NoVoiceModule" {
+                    Add-Status $statusBox $form "[X] No voice module found" "Red"
+                    Add-Status $statusBox $form "    Please join a voice channel in Discord first to download modules." "Yellow"
+                    return
+                }
             }
+            if ($diag.Error) { return }
         }
         $ap = $diag.LatestAppFolder; $av = Get-DiscordAppVersion $ap
-        Add-Status $statusBox $form "[OK] Found $($sc.Name) v$av" "LimeGreen"
-        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
-        $ka = Stop-DiscordProcesses $sc.Processes
-        if ($ka) { Add-Status $statusBox $form "  Discord processes terminated" "Cyan" } else { Add-Status $statusBox $form "  [!] Some processes may still be running, waiting..." "Orange"; Start-Sleep -Seconds 2 }
-        Update-Progress $progressBar $form 40; Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 50
-        Add-Status $statusBox $form "Locating voice module..." "Blue"
+        Add-Status $statusBox $form "Version: v$av" "Cyan"
         $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
-        if (-not $vm) { throw "No discord_voice module found" }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
-        Add-Status $statusBox $form "[OK] Voice module located" "LimeGreen"; Update-Progress $progressBar $form 55
-        Add-Status $statusBox $form "Creating backup of current files..." "Blue"
-        Create-VoiceBackup $tvf $sc.Name $av $statusBox $form | Out-Null
-        Remove-OldBackups; Update-Progress $progressBar $form 60
-        Add-Status $statusBox $form "Removing old voice module files..." "Blue"
-        if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
-        Add-Status $statusBox $form "[OK] Old files removed" "LimeGreen"; Update-Progress $progressBar $form 70
-        Add-Status $statusBox $form "Copying updated module files..." "Blue"
-        Copy-Item "$vbp\*" $tvf -Recurse -Force; Add-Status $statusBox $form "[OK] Module files copied" "LimeGreen"; Update-Progress $progressBar $form 80
-        Save-FixState $sc.Name $av
-        if ($chkFixEqApo.Checked) {
-            Update-Progress $progressBar $form 82
-            $roamingPath = $sc.RoamingPath
-            $eqApoResult = Apply-EqApoFix -RoamingPath $roamingPath -ClientName $sc.Name.Trim() -StatusBox $statusBox -Form $form -SkipConfirmation $false
-            if (-not $eqApoResult) { Add-Status $statusBox $form "[!] EQ APO fix was not applied (cancelled or failed)" "Orange" }
+        Add-Status $statusBox $form "Voice module: $($vm.Name)" "Cyan"
+        Update-Progress $progressBar $form 15
+        if ($chkUpdate.Checked) {
+            Add-Status $statusBox $form "" "White"
+            Add-Status $statusBox $form "Checking for script updates..." "Blue"
+            try {
+                $tmpScript = Join-Path $env:TEMP "DiscordVoiceFixer_check_$(Get-Random).ps1"
+                Invoke-WebRequest -Uri $UPDATE_URL -OutFile $tmpScript -UseBasicParsing -TimeoutSec 15 | Out-Null
+                $remoteContent = Get-Content $tmpScript -Raw
+                $currentContent = if (Test-Path $SAVED_SCRIPT_PATH) { Get-Content $SAVED_SCRIPT_PATH -Raw } 
+                                  elseif (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) { Get-Content $PSCommandPath -Raw }
+                                  else { $null }
+                if ($currentContent -and $remoteContent -ne $currentContent) {
+                    Add-Status $statusBox $form "[!] Script update available!" "Yellow"
+                    if ($chkAutoUpdate.Checked) {
+                        Add-Status $statusBox $form "Auto-applying update..." "Blue"
+                        $targetPath = if (Test-Path $SAVED_SCRIPT_PATH) { $SAVED_SCRIPT_PATH }
+                                      elseif (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) { $PSCommandPath }
+                                      else { $SAVED_SCRIPT_PATH }
+                        Apply-ScriptUpdate $tmpScript $targetPath
+                        Add-Status $statusBox $form "[OK] Update applied - restarting..." "LimeGreen"
+                        return
+                    } else {
+                        $updateResult = [System.Windows.Forms.MessageBox]::Show($form, "A script update is available. Would you like to update now?", "Update Available", "YesNo", "Question")
+                        if ($updateResult -eq "Yes") {
+                            $targetPath = if (Test-Path $SAVED_SCRIPT_PATH) { $SAVED_SCRIPT_PATH }
+                                          elseif (-not [string]::IsNullOrEmpty($PSCommandPath) -and (Test-Path $PSCommandPath)) { $PSCommandPath }
+                                          else { $SAVED_SCRIPT_PATH }
+                            Apply-ScriptUpdate $tmpScript $targetPath
+                            Add-Status $statusBox $form "[OK] Update applied - restarting..." "LimeGreen"
+                            return
+                        }
+                    }
+                } else { Add-Status $statusBox $form "[OK] Script is up to date" "LimeGreen" }
+                Remove-Item $tmpScript -Force -ErrorAction SilentlyContinue
+            } catch { Add-Status $statusBox $form "[!] Could not check for updates: $($_.Exception.Message)" "Orange" }
         }
-        Update-Progress $progressBar $form 85
+        Update-Progress $progressBar $form 20
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Downloading voice backup files..." "Blue"
+        EnsureDir $td
+        $vbp = Join-Path $td "VoiceBackup"
+        if (-not (Download-VoiceBackupFiles $vbp $statusBox $form)) { throw "Failed to download voice backup files" }
+        Update-Progress $progressBar $form 40
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Closing Discord processes..." "Blue"
+        $stopResult = Stop-DiscordProcesses $sc.Processes
+        if (-not $stopResult) { Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"; Start-Sleep -Seconds 2 }
+        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+        Update-Progress $progressBar $form 50
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Creating backup..." "Blue"
+        Create-VoiceBackup $tvf $sc.Name $av $statusBox $form | Out-Null
+        Update-Progress $progressBar $form 60
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "Applying stereo fix..." "Blue"
+        if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
+        Copy-Item "$vbp\*" $tvf -Recurse -Force
+        Save-FixState $sc.Name $av
+        Add-Status $statusBox $form "[OK] Stereo fix applied!" "LimeGreen"
+        Update-Progress $progressBar $form 70
+        Remove-OldBackups
+        if ($chkFixEqApo.Checked) {
+            Add-Status $statusBox $form "" "White"
+            $eqResult = Apply-EqApoFix -RoamingPath $sc.RoamingPath -ClientName $sc.Name.Trim() -StatusBox $statusBox -Form $form -SkipConfirmation $true
+        }
+        Update-Progress $progressBar $form 80
         if ($chkShortcut.Checked) {
+            Add-Status $statusBox $form "" "White"
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
-            $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
+            $spt = $SAVED_SCRIPT_PATH
+            if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
             if ($spt) { Create-StartupShortcut $spt $chkSilentStartup.Checked; Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
             else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
         } else { Remove-StartupShortcut }
         Update-Progress $progressBar $form 90
         if ($chkAutoStart.Checked) {
-            Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; $st = Start-DiscordClient $de
-            if (-not $st -and $sc.FallbackPath) { $fa = Find-DiscordAppPath $sc.FallbackPath; if ($fa) { $ae = Join-Path $fa $sc.Exe; $st = Start-DiscordClient $ae; if ($st) { Add-Status $statusBox $form "[OK] Discord started (from alternate location)" "LimeGreen" } } }
-            elseif ($st) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
-            if (-not $st) { Add-Status $statusBox $form "[!] Could not find Discord executable" "Orange" }
+            Add-Status $statusBox $form "" "White"
+            Add-Status $statusBox $form "Starting Discord..." "Blue"
+            $de = Join-Path $ap $sc.Exe
+            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
         }
         Update-Progress $progressBar $form 100
-        $updateStatusLabel.Text = "Last fixed: $(Get-Date -Format 'MMM dd, yyyy HH:mm') (v$av)"; $updateStatusLabel.ForeColor = $Theme.TextSecondary
-        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== ALL TASKS COMPLETED ===" "LimeGreen"
-        Play-CompletionSound $true; Save-CurrentSettings
-        [System.Windows.Forms.MessageBox]::Show($form,"Discord voice module fix completed successfully!`n`nA backup was created in case you need to rollback.`nYour ORIGINAL modules are preserved permanently.","Success","OK","Information")
-        $form.Close()
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "=== FIX COMPLETED SUCCESSFULLY ===" "LimeGreen"
+        Save-CurrentSettings
+        Play-CompletionSound $true
+        [System.Windows.Forms.MessageBox]::Show($form, "Stereo fix applied successfully!`n`nOriginal modules preserved for rollback.", "Success", "OK", "Information")
     } catch {
-        Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
-        Write-Log "Start Fix error: $($_.Exception.Message)" "ERROR"
-        Play-CompletionSound $false; [System.Windows.Forms.MessageBox]::Show($form,"An error occurred: $($_.Exception.Message)","Error","OK","Error")
+        Add-Status $statusBox $form "" "White"
+        Add-Status $statusBox $form "[X] ERROR: $($_.Exception.Message)" "Red"
+        Write-Log "Fix error: $($_.Exception.Message)" "ERROR"
+        Play-CompletionSound $false
+        [System.Windows.Forms.MessageBox]::Show($form, "An error occurred: $($_.Exception.Message)", "Error", "OK", "Error")
     } finally {
         if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue }
         $btnStart.Enabled = $true; $btnFixAll.Enabled = $true; $btnRollback.Enabled = $true; $btnCheckUpdate.Enabled = $true; $btnFixEqApo.Enabled = $true
     }
 })
 
-# --- btnFixAll: Fix all detected clients ---
 $btnFixAll.Add_Click({
     $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false; $btnFixEqApo.Enabled = $false
-    $statusBox.Clear(); $progressBar.Value = 0; $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    $statusBox.Clear(); $progressBar.Value = 0
+    $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
     try {
-        Add-Status $statusBox $form "Scanning for installed Discord clients..." "Blue"
+        Add-Status $statusBox $form "=== FIX ALL DISCORD CLIENTS ===" "Blue"
+        Add-Status $statusBox $form "Scanning for installed clients..." "Cyan"
         $ic = Get-InstalledClients
-        if ($ic.Count -eq 0) { Add-Status $statusBox $form "[X] No Discord clients found!" "Red"; Add-Status $statusBox $form "    Ensure Discord is installed or currently running." "Yellow"; [System.Windows.Forms.MessageBox]::Show($form,"No Discord clients were found on this system.","No Clients Found","OK","Warning"); return }
+        $corruptedClients = @()
+        foreach ($k in $DiscordClients.Keys) {
+            $c = $DiscordClients[$k]
+            if (Test-Path $c.Path) {
+                $diag = Find-DiscordAppPath $c.Path -ReturnDiagnostics
+                if ($diag.Error -eq "NoModulesFolder" -and $c.Name -match "\[Official\]") {
+                    $corruptedClients += @{ Key = $k; Client = $c; Path = $c.Path; Diag = $diag }
+                }
+            }
+        }
+        if ($corruptedClients.Count -gt 0) {
+            Add-Status $statusBox $form "[!] Found $($corruptedClients.Count) corrupted Discord installation(s)" "Orange"
+            foreach ($corrupt in $corruptedClients) {
+                Add-Status $statusBox $form "    - $($corrupt.Client.Name.Trim())" "Yellow"
+                $reinstallResult = Reinstall-DiscordClient -ClientPath $corrupt.Path -ClientInfo $corrupt.Client -StatusBox $statusBox -Form $form
+                if ($reinstallResult) { $ic = Get-InstalledClients }
+            }
+        }
+        if ($ic.Count -eq 0) {
+            $noVoiceClients = @(); $noModulesClients = @()
+            foreach ($k in $DiscordClients.Keys) {
+                $c = $DiscordClients[$k]
+                if (Test-Path $c.Path) {
+                    $diag = Find-DiscordAppPath $c.Path -ReturnDiagnostics
+                    if ($diag.Error -eq "NoVoiceModule") { $noVoiceClients += $c.Name.Trim() }
+                    elseif ($diag.Error -eq "NoModulesFolder") { $noModulesClients += $c.Name.Trim() }
+                }
+            }
+            if ($noVoiceClients.Count -gt 0) {
+                Add-Status $statusBox $form "[!] Discord found but voice module not downloaded yet" "Orange"
+                Add-Status $statusBox $form "    The voice module downloads when you first join a voice channel." "Yellow"
+                Add-Status $statusBox $form "" "White"
+                Add-Status $statusBox $form "    To fix: 1) Open Discord  2) Join any voice channel  3) Wait 30 seconds  4) Try again" "Yellow"
+                Add-Status $statusBox $form "" "White"
+                Add-Status $statusBox $form "    Affected: $($noVoiceClients -join ', ')" "Yellow"
+                return
+            }
+            if ($noModulesClients.Count -gt 0) {
+                Add-Status $statusBox $form "[!] Discord installation is corrupted (missing modules folder)" "Orange"
+                Add-Status $statusBox $form "    Affected: $($noModulesClients -join ', ')" "Yellow"
+                Add-Status $statusBox $form "" "White"
+                Add-Status $statusBox $form "    Please reinstall Discord manually or use the Check button for guided repair." "Yellow"
+                return
+            }
+            Add-Status $statusBox $form "[X] No Discord clients found" "Red"
+            return
+        }
         $up = @{}; $uc = [System.Collections.ArrayList]@()
         foreach ($c in $ic) { if (-not $up.ContainsKey($c.AppPath)) { $up[$c.AppPath] = $true; [void]$uc.Add($c) } }
         Add-Status $statusBox $form "[OK] Found $($uc.Count) client(s):" "LimeGreen"
@@ -1643,9 +1665,7 @@ $btnFixAll.Add_Click({
 
 #endregion
 
-#region ══════════════════════════════════════════════════════════════════════════
 #region FORM EVENTS & STARTUP
-#region ══════════════════════════════════════════════════════════════════════════
 
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 5000
 $timer.Add_Tick({ Update-DiscordRunningWarning }); $timer.Start()

@@ -500,34 +500,43 @@ function Reinstall-DiscordClient {
 
 # Downloads voice backup files from GitHub
 function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form)
-    try {
-        EnsureDir $DestinationPath
-        Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
-        try { $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30 }
-        catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Forbidden) { throw "GitHub API Rate Limit exceeded. Please try again later." }; throw $_ }
-        $r = @($r)
-        if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
-        $fc = 0; $failedFiles = @()
-        foreach ($f in $r) {
-            if ($f.type -eq "file") {
-                $fp = Join-Path $DestinationPath $f.name
-                Add-Status $StatusBox $Form "  Downloading: $($f.name)" "Cyan"
-                try {
-                    Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30 | Out-Null
-                    if (-not (Test-Path $fp)) { throw "File was not created" }
-                    $fileInfo = Get-Item $fp
-                    if ($fileInfo.Length -eq 0) { throw "Downloaded file is empty" }
-                    $ext = [System.IO.Path]::GetExtension($f.name).ToLower()
-                    if ($ext -eq ".node" -or $ext -eq ".dll") { if ($fileInfo.Length -lt 1024) { Add-Status $StatusBox $Form "  [!] Warning: $($f.name) seems too small ($($fileInfo.Length) bytes)" "Orange" } }
-                    $fc++
-                } catch { Add-Status $StatusBox $Form "  [!] Failed to download $($f.name): $($_.Exception.Message)" "Orange"; $failedFiles += $f.name }
+    $maxRetries = 3; $retryDelay = 2
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            EnsureDir $DestinationPath
+            if ($attempt -gt 1) { Add-Status $StatusBox $Form "  Retry attempt $attempt of $maxRetries..." "Yellow"; Start-Sleep -Seconds $retryDelay }
+            Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
+            try { $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30 }
+            catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Forbidden) { throw "GitHub API Rate Limit exceeded. Please try again later." }; throw $_ }
+            $r = @($r)
+            if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
+            $fc = 0; $failedFiles = @()
+            foreach ($f in $r) {
+                if ($f.type -eq "file") {
+                    $fp = Join-Path $DestinationPath $f.name
+                    Add-Status $StatusBox $Form "  Downloading: $($f.name)" "Cyan"
+                    try {
+                        Invoke-WebRequest -Uri $f.download_url -OutFile $fp -UseBasicParsing -TimeoutSec 30 | Out-Null
+                        if (-not (Test-Path $fp)) { throw "File was not created" }
+                        $fileInfo = Get-Item $fp
+                        if ($fileInfo.Length -eq 0) { throw "Downloaded file is empty" }
+                        $ext = [System.IO.Path]::GetExtension($f.name).ToLower()
+                        if ($ext -eq ".node" -or $ext -eq ".dll") { if ($fileInfo.Length -lt 1024) { Add-Status $StatusBox $Form "  [!] Warning: $($f.name) seems too small ($($fileInfo.Length) bytes)" "Orange" } }
+                        $fc++
+                    } catch { Add-Status $StatusBox $Form "  [!] Failed to download $($f.name): $($_.Exception.Message)" "Orange"; $failedFiles += $f.name }
+                }
             }
+            if ($fc -eq 0) { throw "No valid files were downloaded." }
+            if ($failedFiles.Count -gt 0) { Add-Status $StatusBox $Form "  [!] Warning: $($failedFiles.Count) file(s) failed to download" "Orange" }
+            Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"
+            return $true
+        } catch {
+            $errMsg = $_.Exception.Message
+            if ($attempt -lt $maxRetries) { Add-Status $StatusBox $Form "  [!] Attempt $attempt failed: $errMsg - retrying..." "Orange"; Write-Log "Download attempt $attempt failed: $errMsg" "WARN" }
+            else { Add-Status $StatusBox $Form "  [X] Failed to download files after $maxRetries attempts: $errMsg" "Red"; Write-Log "Download failed after $maxRetries attempts: $errMsg" "ERROR"; return $false }
         }
-        if ($fc -eq 0) { throw "No valid files were downloaded." }
-        if ($failedFiles.Count -gt 0) { Add-Status $StatusBox $Form "  [!] Warning: $($failedFiles.Count) file(s) failed to download" "Orange" }
-        Add-Status $StatusBox $Form "  Downloaded $fc voice backup files" "Cyan"
-        return $true
-    } catch { Add-Status $StatusBox $Form "  [X] Failed to download files: $($_.Exception.Message)" "Red"; Write-Log "Download failed: $($_.Exception.Message)" "ERROR"; return $false }
+    }
+    return $false
 }
 
 # Replaces Discord settings.json with EQ APO compatible version

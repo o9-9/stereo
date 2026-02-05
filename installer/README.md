@@ -1,11 +1,11 @@
 ```mermaid
 flowchart TD
-    A[Script Start] --> B[Parse Parameters<br/>-Silent -CheckOnly -FixClient -Help]
+    A[Script Start] --> B[Parse Parameters\n-Silent\n-CheckOnly\n-FixClient\n-Help]
 
-    B --> C[Environment Setup<br/>TLS 1.2<br/>Disable Progress Output]
-    C --> D[Load Persistent State<br/>settings.json<br/>state.json]
+    B --> C[Environment Setup\nTLS 1.2\nDisable Progress Output]
+    C --> D[Load Persistent State\nsettings.json\nstate.json]
 
-    D --> E[Discover Discord Clients<br/>Official + Modded]
+    D --> E[Discover Discord Clients\nOfficial + Modded]
 
     %% Mode split
     E -->|GUI Mode| F[Initialize WinForms UI]
@@ -16,7 +16,7 @@ flowchart TD
     G --> H[Core Logic Pipeline]
 
     %% Core pipeline
-    H --> I[Resolve Client Paths<br/>Install / Roaming / Shortcuts]
+    H --> I[Resolve Client Paths\nInstall / Roaming / Shortcuts]
 
     I --> J{Valid Client?}
     J -->|No| X[Skip Client]
@@ -40,13 +40,13 @@ flowchart TD
     Q -->|Yes| R[Validate Existing Backups]
 
     R --> S{Original Backup Exists?}
-    S -->|No| T[[Create ORIGINAL Backup<br/>DO NOT TOUCH]]
+    S -->|No| T[[Create ORIGINAL Backup\nDO NOT TOUCH]]
     S -->|Yes| U
 
     T --> U[[Create Rotating Backup]]
 
     %% Fix detection
-    U --> V[Hash Current Voice Module<br/>MD5]
+    U --> V[Hash Current Voice Module\nMD5]
     V --> W{Stereo Fix Applied?}
 
     W -->|Yes| Y[Update State.json]
@@ -56,9 +56,10 @@ flowchart TD
     Z -->|No| AA[[Download Stereo Voice Modules]]
 
     %% Fix apply
-    AA --> AB[[Replace Voice Module Files<br/>DO NOT TOUCH]]
-    AB --> AC[[Verify Fix via Hash<br/>DO NOT TOUCH]]
+    AA --> AB[[Replace Voice Module Files\nDO NOT TOUCH]]
+    AB --> AC[[Verify Fix via Hash\nDO NOT TOUCH]]
     AC --> Y
+
 ```
 # DiscordVoiceFixer.ps1 — Complete Internal Documentation
 (Architecture • Logic Flow • Source Walkthrough)

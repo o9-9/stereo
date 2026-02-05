@@ -98,7 +98,7 @@ function Load-Settings {
         try { 
             $s = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
             foreach ($k in $d.PSObject.Properties.Name) { 
-                if ($null -eq $s.$k) { $s | Add-Member -NotePropertyName $k -NotePropertyValue $d.$k -Force } 
+                if ($k -notin $s.PSObject.Properties.Name) { $s | Add-Member -NotePropertyName $k -NotePropertyValue $d.$k -Force } 
             }
             return $s
         } catch { Write-Log "Failed to load settings: $($_.Exception.Message)" "WARN" }
@@ -248,7 +248,8 @@ function Add-Status {
     param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [string]$Message, [string]$ColorName="White")
     Write-Log $Message
     if ($null -eq $StatusBox) { if ($Silent) { Write-Host $Message }; return }
-    $c = try { [System.Drawing.Color]::FromName($ColorName) } catch { [System.Drawing.Color]::White }
+    $c = [System.Drawing.Color]::FromName($ColorName)
+    if (-not $c.IsKnownColor -and $c.A -eq 0) { $c = [System.Drawing.Color]::White }
     $ts = Get-Date -Format "HH:mm:ss"
     $StatusBox.SelectionStart = $StatusBox.TextLength; $StatusBox.SelectionLength = 0
     $StatusBox.SelectionColor = $c
@@ -295,13 +296,24 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
 function Find-DiscordAppPath { 
     param([string]$BasePath, [switch]$ReturnDiagnostics)
     $af = Get-ChildItem $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue | 
-        Sort-Object { $folder = $_; try { if ($folder.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { $folder.Name } } catch { $folder.Name } } -Descending
+        Sort-Object { 
+            $folder = $_
+            if ($folder.Name -match "app-([\d\.]+)") { 
+                $versionStr = $matches[1]
+                $parts = $versionStr.Split('.') | ForEach-Object { [int]$_ }
+                while ($parts.Count -lt 4) { $parts += 0 }
+                $parts = $parts[0..3]
+                return [Version]::new($parts[0], $parts[1], $parts[2], $parts[3])
+            }
+            return [Version]::new(0, 0, 0, 0)
+        } -Descending
     $diag = @{ BasePath = $BasePath; AppFoldersFound = @(); ModulesFolderExists = $false; VoiceModuleExists = $false
                LatestAppFolder = $null; LatestAppVersion = $null; ModulesPath = $null; VoiceModulePath = $null; Error = $null }
     if (-not $af -or $af.Count -eq 0) { $diag.Error = "NoAppFolders"; if ($ReturnDiagnostics) { return $diag }; return $null }
     $diag.AppFoldersFound = @($af | ForEach-Object { $_.Name })
     $diag.LatestAppFolder = $af[0].FullName
-    if ($af[0].Name -match "app-([\d\.]+)") { $diag.LatestAppVersion = $matches[1] } else { $diag.LatestAppVersion = $af[0].Name }
+    $versionMatch = [regex]::Match($af[0].Name, "app-([\d\.]+)")
+    if ($versionMatch.Success) { $diag.LatestAppVersion = $versionMatch.Groups[1].Value } else { $diag.LatestAppVersion = $af[0].Name }
     foreach ($f in $af) {
         $mp = Join-Path $f.FullName "modules"
         if (Test-Path $mp) { 
@@ -319,7 +331,8 @@ function Find-DiscordAppPath {
 }
 
 function Get-DiscordAppVersion { param([string]$AppPath)
-    if ($AppPath -match "app-([\d\.]+)") { return $matches[1] }
+    $versionMatch = [regex]::Match($AppPath, "app-([\d\.]+)")
+    if ($versionMatch.Success) { return $versionMatch.Groups[1].Value }
     try { $exe = Get-ChildItem $AppPath -Filter "*.exe" | Select-Object -First 1; if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion } } catch {}
     return "Unknown"
 }
@@ -341,8 +354,10 @@ function Get-PathFromShortcuts { param([string]$ShortcutName)
     $scs = Get-ChildItem $sm -Filter "$ShortcutName.lnk" -Recurse -ErrorAction SilentlyContinue
     if (-not $scs) { return $null }
     $ws = New-Object -ComObject WScript.Shell
-    foreach ($lf in $scs) { try { $sc = $ws.CreateShortcut($lf.FullName); if (Test-Path $sc.TargetPath) { return (Split-Path $sc.TargetPath -Parent) } } catch { } }
-    return $null
+    $result = $null
+    foreach ($lf in $scs) { try { $sc = $ws.CreateShortcut($lf.FullName); if (Test-Path $sc.TargetPath) { $result = (Split-Path $sc.TargetPath -Parent); break } } catch { } }
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
+    return $result
 }
 
 # Resolves actual client path from config, running process, or shortcuts
@@ -358,7 +373,7 @@ function Get-RealClientPath { param($ClientObj)
 # Scans system for all installed Discord clients with valid voice modules
 function Get-InstalledClients {
     $inst = [System.Collections.ArrayList]@()
-    $foundPaths = [System.Collections.Generic.HashSet[string]]@()
+    $foundPaths = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($k in $DiscordClients.Keys) {
         $c = $DiscordClients[$k]; $fp = $null
         if (Test-Path $c.Path) { $fp = $c.Path }
@@ -451,6 +466,10 @@ function Reinstall-DiscordClient {
         Add-Status $StatusBox $Form "Step 3/4: Downloading Discord installer..." "Blue"
         $installerPath = Join-Path $env:TEMP "DiscordSetup_$([guid]::NewGuid()).exe"
         Invoke-WebRequest -Uri $setupUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120
+        if (-not (Test-Path $installerPath)) { throw "Installer download failed - file not created" }
+        $installerSize = (Get-Item $installerPath).Length / 1MB
+        if ($installerSize -lt 1) { Remove-Item $installerPath -Force -ErrorAction SilentlyContinue; throw "Installer file is too small ($([math]::Round($installerSize, 2)) MB) - download may have failed" }
+        Add-Status $StatusBox $Form "[OK] Downloaded installer ($([math]::Round($installerSize, 1)) MB)" "LimeGreen"
         Add-Status $StatusBox $Form "Step 4/4: Running Discord installer..." "Blue"
         Start-Process $installerPath
         Add-Status $StatusBox $Form "Waiting for voice modules to download..." "Blue"
@@ -571,7 +590,7 @@ function Apply-EqApoFix {
         try { Invoke-WebRequest -Uri $SETTINGS_JSON_URL -OutFile $tempSettingsPath -UseBasicParsing -TimeoutSec 30 | Out-Null }
         catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) { Add-Status $StatusBox $Form "  [X] settings.json not found in repository" "Red"; return $false }; throw $_ }
         Add-Status $StatusBox $Form "  Verifying downloaded file..." "Cyan"
-        try { $jsonContent = Get-Content $tempSettingsPath -Raw | ConvertFrom-Json; if ($null -eq $jsonContent) { throw "Downloaded file is empty or invalid" }; Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen" }
+        try { $jsonContent = Get-Content $tempSettingsPath -Raw | ConvertFrom-Json; if ($null -eq $jsonContent -or ($jsonContent -is [array] -and $jsonContent.Count -eq 0) -or ($jsonContent -is [PSCustomObject] -and $jsonContent.PSObject.Properties.Count -eq 0)) { throw "Downloaded file is empty or invalid" }; Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen" }
         catch { Add-Status $StatusBox $Form "  [X] Downloaded file is not valid JSON: $($_.Exception.Message)" "Red"; Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue; return $false }
         if (Test-Path $targetSettingsPath) {
             Add-Status $StatusBox $Form "  Removing old settings.json..." "Cyan"
@@ -599,7 +618,7 @@ function Remove-OldSettingsBackups {
 
 function Apply-EqApoFixAll {
     param([System.Windows.Forms.RichTextBox]$StatusBox, [System.Windows.Forms.Form]$Form, [bool]$SkipConfirmation = $false)
-    $processedPaths = [System.Collections.Generic.HashSet[string]]@()
+    $processedPaths = New-Object 'System.Collections.Generic.HashSet[string]'
     $successCount = 0; $failCount = 0
     foreach ($k in $DiscordClients.Keys) {
         $client = $DiscordClients[$k]
@@ -640,7 +659,7 @@ function Get-OriginalBackup { param([string]$ClientName)
                 $backupDate = Parse-BackupDate $m.BackupDate
                 if ($backupDate -eq [DateTime]::MinValue) { $backupDate = (Get-Item $originalPath).CreationTime }
                 return @{ Path=$originalPath; Name="Original Discord Modules"; ClientName=$m.ClientName; AppVersion=$m.AppVersion; BackupDate=$backupDate; IsOriginal=$true
-                          DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm'))" }
+                          DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture))" }
             } catch { return $null }
         }
     }
@@ -721,7 +740,7 @@ function Get-AvailableBackups {
                 if (-not $validation.Valid) { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = $validation.Reason }); continue }
                 $backupDate = Parse-BackupDate $m.BackupDate
                 if ($backupDate -eq [DateTime]::MinValue) { $backupDate = (Get-Item $f.FullName).CreationTime }
-                [void]$bks.Add(@{ Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion; BackupDate=$backupDate; IsOriginal=$true; DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm'))"; FileCount = $validation.FileCount; TotalSize = $validation.TotalSize })
+                [void]$bks.Add(@{ Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion; BackupDate=$backupDate; IsOriginal=$true; DisplayName="[ORIGINAL] $($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture))"; FileCount = $validation.FileCount; TotalSize = $validation.TotalSize })
             } catch { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = "Corrupted metadata.json" }); continue }
         } else { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = "Missing metadata.json" }) }
     }
@@ -736,7 +755,7 @@ function Get-AvailableBackups {
                 if (-not $validation.Valid) { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = $validation.Reason }); continue }
                 $backupDate = Parse-BackupDate $m.BackupDate
                 if ($backupDate -eq [DateTime]::MinValue) { $backupDate = (Get-Item $f.FullName).CreationTime }
-                [void]$bks.Add(@{ Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion; BackupDate=$backupDate; IsOriginal=$false; DisplayName="$($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm'))"; FileCount = $validation.FileCount; TotalSize = $validation.TotalSize })
+                [void]$bks.Add(@{ Path=$f.FullName; Name=$f.Name; ClientName=$m.ClientName; AppVersion=$m.AppVersion; BackupDate=$backupDate; IsOriginal=$false; DisplayName="$($m.ClientName) v$($m.AppVersion) - $($backupDate.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture))"; FileCount = $validation.FileCount; TotalSize = $validation.TotalSize })
             } catch { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = "Corrupted metadata.json" }); continue }
         } else { [void]$skippedBackups.Add(@{ Path = $f.FullName; Reason = "Missing metadata.json" }) }
     }
@@ -744,7 +763,7 @@ function Get-AvailableBackups {
         Add-Status $StatusBox $Form "  [!] Skipped $($skippedBackups.Count) invalid backup(s):" "Orange"
         foreach ($skip in $skippedBackups) { Add-Status $StatusBox $Form "      - $(Split-Path $skip.Path -Leaf) : $($skip.Reason)" "Orange" }
     }
-    if ($bks.Count -eq 0) { return @() }
+    if ($bks.Count -eq 0) { return ,@() }
     return ,$bks.ToArray()
 }
 
@@ -799,7 +818,7 @@ function Remove-OldBackups {
 # Checks if Discord was updated since last fix by comparing versions
 function Check-DiscordUpdated { param([string]$ClientPath, [string]$ClientName)
     $st = Get-StateData; if (-not $st) { return $null }
-    $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
+    $ck = $ClientName -replace '\s+','_' -replace '\[|\]','' -replace '-','_'
     $ap = Find-DiscordAppPath $ClientPath; if (-not $ap) { return $null }
     $cv = Get-DiscordAppVersion $ap
     if ($st.$ck) {
@@ -815,7 +834,7 @@ function Save-FixState { param([string]$ClientName, [string]$Version)
     Initialize-BackupDirectory
     $st = Get-StateData; if (-not $st) { $st = @{} }
     if ($st -is [PSCustomObject]) { $ns = @{}; $st.PSObject.Properties | ForEach-Object { $ns[$_.Name] = $_.Value }; $st = $ns }
-    $ck = $ClientName -replace '\s+','_' -replace '\[|\]',''
+    $ck = $ClientName -replace '\s+','_' -replace '\[|\]','' -replace '-','_'
     $st[$ck] = @{LastFixedVersion=$Version; LastFixDate=(Get-Date).ToString("o", [System.Globalization.CultureInfo]::InvariantCulture)}
     Save-StateData $st
 }
@@ -838,6 +857,7 @@ function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$f
     $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
     if ($RunSilent) { $ar += " -Silent" }
     $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
     return $true
 }
 
@@ -849,7 +869,7 @@ function Remove-StartupShortcut {
 function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
     $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
     $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
-    $bc | Out-File $bf -Encoding ASCII -Force
+    $bc | Out-File $bf -Encoding OEM -Force
     Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
 }
 
@@ -964,7 +984,7 @@ if ($Silent -or $CheckOnly) {
             if ($uc -and $uc.Updated) { Write-Host "[UPDATE] $($ci.Name.Trim()): v$($uc.OldVersion) -> v$($uc.NewVersion)"; $nf = $true }
             elseif ($uc -and $uc.LastFixDate) { 
                 $lf = Safe-ParseDateTime $uc.LastFixDate
-                if ($lf) { Write-Host "[OK] $($ci.Name.Trim()): v$($uc.CurrentVersion) (fixed: $($lf.ToString('MMM dd')))" }
+                if ($lf) { Write-Host "[OK] $($ci.Name.Trim()): v$($uc.CurrentVersion) (fixed: $($lf.ToString('MMM dd', [System.Globalization.CultureInfo]::InvariantCulture)))" }
                 else { Write-Host "[OK] $($ci.Name.Trim()): v$($uc.CurrentVersion) (fixed: unknown date)" }
             }
             else { Write-Host "[NEW] $($ci.Name.Trim()): Never fixed"; $nf = $true }
@@ -1018,7 +1038,7 @@ if ($Silent -or $CheckOnly) {
             $cl = $ci.Client; $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
             Write-Host "Fixing $($cl.Name.Trim()) v$av..."
             try {
-                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
                 if (-not $vm) { throw "No voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
                 Create-VoiceBackup $tvf $cl.Name $av $null $null | Out-Null
@@ -1030,7 +1050,7 @@ if ($Silent -or $CheckOnly) {
         Remove-OldBackups
         if ($set.FixEqApo) {
             Write-Host "Applying EQ APO fix to all clients..."
-            $processedPaths = [System.Collections.Generic.HashSet[string]]@()
+            $processedPaths = New-Object 'System.Collections.Generic.HashSet[string]'
             foreach ($ci in $uc) {
                 $roamingPath = $ci.Client.RoamingPath
                 if ($processedPaths.Contains($roamingPath)) { continue }
@@ -1123,7 +1143,7 @@ function Update-ScriptStatusLabel {
 }
 
 function Update-DiscordRunningWarning {
-    $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
+    $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","Vencord","Equicord","BetterVencord")
     $r = Get-Process -Name $dp -ErrorAction SilentlyContinue
     if ($r) { $discordRunningLabel.Text = "[!] Discord is running - it will be closed when you apply the fix"; $discordRunningLabel.Visible = $true }
     else { $discordRunningLabel.Text = ""; $discordRunningLabel.Visible = $false }
@@ -1210,7 +1230,7 @@ $btnFixEqApo.Add_Click({
     $btnFixEqApo.Enabled = $false; $statusBox.Clear(); $progressBar.Value = 0
     try {
         Update-Progress $progressBar $form 10
-        $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord")
+        $dp = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","Vencord","Equicord","BetterVencord")
         $r = Get-Process -Name $dp -ErrorAction SilentlyContinue
         if ($r) {
             $closeResult = [System.Windows.Forms.MessageBox]::Show($form, "Discord is currently running. It needs to be closed to apply the EQ APO fix.`n`nClose Discord now?", "Discord Running", "YesNo", "Question")
@@ -1250,7 +1270,7 @@ $clientCombo.Add_SelectedIndexChanged({
     if ($uc -and $uc.Updated) { $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning }
     elseif ($uc -and $uc.LastFixDate) { 
         $lf = Safe-ParseDateTime $uc.LastFixDate
-        if ($lf) { $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
+        if ($lf) { $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
         else { $updateStatusLabel.Text = "Last fixed: unknown date (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
     }
     else { $updateStatusLabel.Text = "" }
@@ -1310,8 +1330,8 @@ $btnCheckUpdate.Add_Click({
             if ($lf) {
                 Add-Status $statusBox $form "[OK] No update detected" "LimeGreen"
                 Add-Status $statusBox $form "    Version: v$($uc.CurrentVersion)" "Cyan"
-                Add-Status $statusBox $form "    Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm'))" "Cyan"
-                $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"
+                Add-Status $statusBox $form "    Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture))" "Cyan"
+                $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)) (v$($uc.CurrentVersion))"
                 $updateStatusLabel.ForeColor = $Theme.TextSecondary
             } else {
                 Add-Status $statusBox $form "[OK] No update detected" "LimeGreen"
@@ -1450,7 +1470,8 @@ $btnStart.Add_Click({
         }
         $ap = $diag.LatestAppFolder; $av = Get-DiscordAppVersion $ap
         Add-Status $statusBox $form "Version: v$av" "Cyan"
-        $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+        $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $vm) { Add-Status $statusBox $form "[X] No voice module found after operation" "Red"; return }
         $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
         Add-Status $statusBox $form "Voice module: $($vm.Name)" "Cyan"
         Update-Progress $progressBar $form 15
@@ -1553,6 +1574,7 @@ $btnStart.Add_Click({
 })
 
 $btnFixAll.Add_Click({
+    if (-not $btnFixAll.Enabled) { return }
     $btnStart.Enabled = $false; $btnFixAll.Enabled = $false; $btnRollback.Enabled = $false; $btnCheckUpdate.Enabled = $false; $btnFixEqApo.Enabled = $false
     $statusBox.Clear(); $progressBar.Value = 0
     $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
@@ -1689,7 +1711,7 @@ $form.Add_Shown({
             if ($uc -and $uc.Updated) { $updateStatusLabel.Text = "Discord updated! v$($uc.OldVersion) -> v$($uc.NewVersion) - Fix recommended"; $updateStatusLabel.ForeColor = $Theme.Warning }
             elseif ($uc -and $uc.LastFixDate) { 
                 $lf = Safe-ParseDateTime $uc.LastFixDate
-                if ($lf) { $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm')) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
+                if ($lf) { $updateStatusLabel.Text = "Last fixed: $($lf.ToString('MMM dd, yyyy HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)) (v$($uc.CurrentVersion))"; $updateStatusLabel.ForeColor = $Theme.TextSecondary }
             }
         }
     }

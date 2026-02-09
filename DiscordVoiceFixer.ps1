@@ -276,13 +276,24 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $allProcesses = $discordProcesses + @("Update")
     $p = Get-Process -Name $allProcesses -ErrorAction SilentlyContinue | Where-Object {
         if ($_.Name -eq "Update") {
-            try { $path = $_.MainModule.FileName; return $path -match "Discord|Lightcord|Vencord|Equicord|BetterVencord" } catch { return $false }
+            try { $path = $_.MainModule.FileName; return $path -match "Discord|Lightcord|Vencord|Equicord|BetterVencord" } catch { return $true }
         }
         return $true
     }
     if ($p) {
+        # First attempt: Stop-Process
         $p | Stop-Process -Force -ErrorAction SilentlyContinue
-        for ($i=0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 500
+        # Second attempt: taskkill /F as fallback for stubborn processes
+        $remaining = Get-Process -Name $allProcesses -ErrorAction SilentlyContinue
+        if ($remaining) {
+            foreach ($proc in $remaining) {
+                try { & taskkill /F /PID $proc.Id 2>$null | Out-Null } catch { }
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        # Wait up to 10 seconds for processes to fully exit
+        for ($i=0; $i -lt 40; $i++) {
             $remaining = Get-Process -Name $discordProcesses -ErrorAction SilentlyContinue
             if (-not $remaining) { return $true }
             Start-Sleep -Milliseconds 250
@@ -1520,8 +1531,16 @@ $btnStart.Add_Click({
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"
         $stopResult = Stop-DiscordProcesses $sc.Processes
-        if (-not $stopResult) { Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"; Start-Sleep -Seconds 2 }
+        if (-not $stopResult) {
+            Add-Status $statusBox $form "[!] Warning: Some processes may still be running, retrying..." "Orange"
+            Start-Sleep -Seconds 3
+            $stopResult = Stop-DiscordProcesses $sc.Processes
+            if (-not $stopResult) {
+                throw "Could not close all Discord processes. Please close Discord manually (check system tray) and try again."
+            }
+        }
         Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+        Start-Sleep -Milliseconds 500
         Update-Progress $progressBar $form 50
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "Creating backup..." "Blue"
@@ -1643,8 +1662,17 @@ $btnFixAll.Add_Click({
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Closing all Discord processes..." "Blue"
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         $stopResult = Stop-DiscordProcesses $allProcs
-        if (-not $stopResult) { Add-Status $statusBox $form "[!] Warning: Some processes may still be running, waiting..." "Orange"; Start-Sleep -Seconds 2 }
-        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"; Update-Progress $progressBar $form 30
+        if (-not $stopResult) {
+            Add-Status $statusBox $form "[!] Warning: Some processes may still be running, retrying..." "Orange"
+            Start-Sleep -Seconds 3
+            $stopResult = Stop-DiscordProcesses $allProcs
+            if (-not $stopResult) {
+                throw "Could not close all Discord processes. Please close Discord manually (check system tray) and try again."
+            }
+        }
+        Add-Status $statusBox $form "[OK] Discord processes closed" "LimeGreen"
+        Start-Sleep -Milliseconds 500
+        Update-Progress $progressBar $form 30
         $ppc = 50 / [Math]::Max($uc.Count, 1); $cp = 30; $fxc = 0; $fc = @()
         foreach ($ci in $uc) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== Fixing: $($ci.Name.Trim()) ===" "Blue"

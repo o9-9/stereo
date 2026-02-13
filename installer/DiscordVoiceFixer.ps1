@@ -349,7 +349,12 @@ function Get-DiscordAppVersion { param([string]$AppPath)
 }
 
 function Start-DiscordClient { param([string]$ExePath)
-    if (Test-Path $ExePath) { Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true }
+    if (-not (Test-Path $ExePath)) { return $false }
+    try { Start-Process $ExePath -WindowStyle Normal; return $true } catch { }
+    try { Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true } catch { }
+    $updateExe = Join-Path (Split-Path (Split-Path $ExePath -Parent) -Parent) "Update.exe"
+    $exeName = Split-Path $ExePath -Leaf
+    if (Test-Path $updateExe) { try { Start-Process $updateExe -ArgumentList "--processStart",$exeName; return $true } catch { } }
     return $false
 }
 
@@ -1262,7 +1267,7 @@ $btnFixEqApo.Add_Click({
                 $idx = $clientCombo.SelectedIndex
                 if ($idx -ge 0 -and $idx -lt $DiscordClients.Count) {
                     $sc = $DiscordClients[$idx]; $bp = Get-RealClientPath $sc
-                    if ($bp) { $ap = Find-DiscordAppPath $bp; if ($ap) { Add-Status $statusBox $form "Starting Discord..." "Blue"; $de = Join-Path $ap $sc.Exe; if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" } } }
+                    if ($bp) { $ap = Find-DiscordAppPath $bp; if ($ap) { Add-Status $statusBox $form "Starting Discord..." "Blue"; try { $de = Join-Path $ap $sc.Exe; if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" } else { Add-Status $statusBox $form "[!] Could not start Discord automatically" "Orange" } } catch { Add-Status $statusBox $form "[!] Could not start Discord automatically" "Orange" } } }
                 }
             }
             Update-Progress $progressBar $form 100; Play-CompletionSound $true
@@ -1427,8 +1432,11 @@ $btnRollback.Add_Click({
         Update-Progress $progressBar $form 90
         if ($chkAutoStart.Checked) {
             Add-Status $statusBox $form "Starting Discord..." "Blue"
-            $de = Join-Path $ap $sc.Exe
-            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+            try {
+                $de = Join-Path $ap $sc.Exe
+                if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+                else { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange" }
+            } catch { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange"; Write-Log "Auto-start Discord failed: $($_.Exception.Message)" "WARN" }
         }
         Update-Progress $progressBar $form 100
         Add-Status $statusBox $form "" "White"
@@ -1571,8 +1579,11 @@ $btnStart.Add_Click({
         if ($chkAutoStart.Checked) {
             Add-Status $statusBox $form "" "White"
             Add-Status $statusBox $form "Starting Discord..." "Blue"
-            $de = Join-Path $ap $sc.Exe
-            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+            try {
+                $de = Join-Path $ap $sc.Exe
+                if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+                else { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange" }
+            } catch { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange"; Write-Log "Auto-start Discord failed: $($_.Exception.Message)" "WARN" }
         }
         Update-Progress $progressBar $form 100
         Add-Status $statusBox $form "" "White"
@@ -1704,8 +1715,11 @@ $btnFixAll.Add_Click({
         } else { Remove-StartupShortcut }
         if ($chkAutoStart.Checked -and $fxc -gt 0 -and $uc.Count -gt 0) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Starting Discord..." "Blue"
-            $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe
-            if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+            try {
+                $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe
+                if (Start-DiscordClient $de) { Add-Status $statusBox $form "[OK] Discord started" "LimeGreen" }
+                else { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange" }
+            } catch { Add-Status $statusBox $form "[!] Could not start Discord automatically - please start it manually" "Orange"; Write-Log "Auto-start Discord failed: $($_.Exception.Message)" "WARN" }
         }
         Update-Progress $progressBar $form 100
         Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== FIX ALL COMPLETED ===" "LimeGreen"

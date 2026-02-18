@@ -910,7 +910,7 @@ function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$f
         $ws = New-Object -ComObject WScript.Shell
         $sc = $ws.CreateShortcut($sp)
         $sc.TargetPath = "powershell.exe"
-        $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
+        $ar = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
         if ($RunSilent) { $ar += " -Silent" }
         $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
         return $true
@@ -935,7 +935,7 @@ function Remove-StartupShortcut {
 
 function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
     $bf = Join-Path $env:TEMP "StereoInstaller_Update.bat"
-    $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
+    $bc = "@echo off`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`ntimeout /t 1 /nobreak >nul`nstart `"`" powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$CurrentScriptPath`"`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
     $bc | Out-File $bf -Encoding OEM -Force
     Start-Process "cmd.exe" -ArgumentList "/c","`"$bf`"" -WindowStyle Hidden
 }

@@ -129,6 +129,18 @@ function Safe-ParseDateTime {
     return $result
 }
 
+function Get-HttpStatusCode {
+    param($ErrorRecord)
+    try {
+        if ($null -eq $ErrorRecord -or $null -eq $ErrorRecord.Exception) { return $null }
+        $response = $ErrorRecord.Exception.Response
+        if ($null -eq $response) { return $null }
+        return [int]$response.StatusCode
+    } catch {
+        return $null
+    }
+}
+
 #endregion
 
 #region BACKUP VALIDATION & FIX VERIFICATION
@@ -176,16 +188,24 @@ function Verify-StereoFix {
                 }
             }
         }
-        $latestBackups = Get-ChildItem $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+        $clientBackupPrefix = "${scn}_"
+        $latestBackups = Get-ChildItem $BACKUP_ROOT -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$clientBackupPrefix*" } |
+            Sort-Object Name -Descending
+        $hasClientBackupHashes = $false
         foreach ($backup in $latestBackups) {
             $backupVoicePath = Join-Path $backup.FullName "voice_module"
             $backupNodeFile = Get-ChildItem $backupVoicePath -Filter "*.node" -File -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($backupNodeFile) {
+                $hasClientBackupHashes = $true
                 $backupHash = (Get-FileHash $backupNodeFile.FullName -Algorithm MD5).Hash
-                if ($currentHash -ne $backupHash -and (Test-Path $originalBackupPath)) {
-                    return @{ Status = "Fixed"; Message = "Stereo fix is applied"; IsFixed = $true; CurrentHash = $currentHash; FileSize = $currentSize }
+                if ($currentHash -eq $backupHash) {
+                    return @{ Status = "NotFixed"; Message = "Current voice module matches a saved mono backup"; IsFixed = $false; CurrentHash = $currentHash; BackupHash = $backupHash }
                 }
             }
+        }
+        if ($hasClientBackupHashes -and (Test-Path $originalBackupPath)) {
+            return @{ Status = "Fixed"; Message = "Stereo fix is applied"; IsFixed = $true; CurrentHash = $currentHash; FileSize = $currentSize }
         }
         if (Test-Path $originalBackupPath) {
             return @{ Status = "Fixed"; Message = "Stereo fix appears to be applied (differs from original)"; IsFixed = $true; CurrentHash = $currentHash; FileSize = $currentSize }
@@ -276,7 +296,7 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $allProcesses = $discordProcesses + @("Update")
     $p = Get-Process -Name $allProcesses -ErrorAction SilentlyContinue | Where-Object {
         if ($_.Name -eq "Update") {
-            try { $path = $_.MainModule.FileName; return $path -match "Discord|Lightcord|Vencord|Equicord|BetterVencord" } catch { return $true }
+            try { $path = $_.MainModule.FileName; return $path -match "Discord|Lightcord|Vencord|Equicord|BetterVencord" } catch { return $false }
         }
         return $true
     }
@@ -311,7 +331,14 @@ function Find-DiscordAppPath {
             $folder = $_
             if ($folder.Name -match "app-([\d\.]+)") { 
                 $versionStr = $matches[1]
-                $parts = $versionStr.Split('.') | ForEach-Object { [int]$_ }
+                $parts = @()
+                foreach ($partText in $versionStr.Split('.')) {
+                    [int]$partValue = 0
+                    if (-not [int]::TryParse($partText, [ref]$partValue)) {
+                        return [Version]::new(0, 0, 0, 0)
+                    }
+                    $parts += $partValue
+                }
                 while ($parts.Count -lt 4) { $parts += 0 }
                 $parts = $parts[0..3]
                 return [Version]::new($parts[0], $parts[1], $parts[2], $parts[3])
@@ -542,7 +569,11 @@ function Download-VoiceBackupFiles { param([string]$DestinationPath, [System.Win
             if ($attempt -gt 1) { Add-Status $StatusBox $Form "  Retry attempt $attempt of $maxRetries..." "Yellow"; Start-Sleep -Seconds $retryDelay }
             Add-Status $StatusBox $Form "  Fetching file list from GitHub..." "Cyan"
             try { $r = Invoke-RestMethod -Uri $VOICE_BACKUP_API -UseBasicParsing -TimeoutSec 30 }
-            catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Forbidden) { throw "GitHub API Rate Limit exceeded. Please try again later." }; throw $_ }
+            catch {
+                $statusCode = Get-HttpStatusCode $_
+                if ($statusCode -eq 403) { throw "GitHub API Rate Limit exceeded. Please try again later." }
+                throw $_
+            }
             $r = @($r)
             if ($r.Count -eq 0) { throw "GitHub repository response is empty." }
             $fc = 0; $failedFiles = @()
@@ -604,7 +635,11 @@ function Apply-EqApoFix {
         Add-Status $StatusBox $Form "  Downloading settings.json from GitHub..." "Cyan"
         $tempSettingsPath = Join-Path $env:TEMP "discord_settings_$(Get-Random).json"
         try { Invoke-WebRequest -Uri $SETTINGS_JSON_URL -OutFile $tempSettingsPath -UseBasicParsing -TimeoutSec 30 | Out-Null }
-        catch { if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) { Add-Status $StatusBox $Form "  [X] settings.json not found in repository" "Red"; return $false }; throw $_ }
+        catch {
+            $statusCode = Get-HttpStatusCode $_
+            if ($statusCode -eq 404) { Add-Status $StatusBox $Form "  [X] settings.json not found in repository" "Red"; return $false }
+            throw $_
+        }
         Add-Status $StatusBox $Form "  Verifying downloaded file..." "Cyan"
         try { $jsonContent = Get-Content $tempSettingsPath -Raw | ConvertFrom-Json; if ($null -eq $jsonContent -or ($jsonContent -is [array] -and $jsonContent.Count -eq 0) -or ($jsonContent -is [PSCustomObject] -and $jsonContent.PSObject.Properties.Count -eq 0)) { throw "Downloaded file is empty or invalid" }; Add-Status $StatusBox $Form "  [OK] File verified as valid JSON" "LimeGreen" }
         catch { Add-Status $StatusBox $Form "  [X] Downloaded file is not valid JSON: $($_.Exception.Message)" "Red"; Remove-Item $tempSettingsPath -Force -ErrorAction SilentlyContinue; return $false }
@@ -868,18 +903,33 @@ function Save-ScriptToAppData { param([System.Windows.Forms.RichTextBox]$StatusB
 function Create-StartupShortcut { param([string]$ScriptPath, [bool]$RunSilent=$false)
     $sf = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
     $sp = Join-Path $sf "DiscordVoiceFixer.lnk"
-    $ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut($sp)
-    $sc.TargetPath = "powershell.exe"
-    $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
-    if ($RunSilent) { $ar += " -Silent" }
-    $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
-    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
-    return $true
+    $ws = $null
+    try {
+        EnsureDir $sf
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut($sp)
+        $sc.TargetPath = "powershell.exe"
+        $ar = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
+        if ($RunSilent) { $ar += " -Silent" }
+        $sc.Arguments = $ar; $sc.WorkingDirectory = (Split-Path $ScriptPath -Parent); $sc.WindowStyle = 7; $sc.Save()
+        return $true
+    } catch {
+        Write-Log "Failed to create startup shortcut: $($_.Exception.Message)" "WARN"
+        return $false
+    } finally {
+        if ($null -ne $ws) {
+            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws) } catch { }
+        }
+    }
 }
 
 function Remove-StartupShortcut {
     $sp = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DiscordVoiceFixer.lnk"
-    if (Test-Path $sp) { Remove-Item $sp -Force -ErrorAction SilentlyContinue }
+    try {
+        if (Test-Path $sp) { Remove-Item $sp -Force -ErrorAction SilentlyContinue }
+    } catch {
+        Write-Log "Failed to remove startup shortcut: $($_.Exception.Message)" "WARN"
+    }
 }
 
 function Apply-ScriptUpdate { param([string]$UpdatedScriptPath, [string]$CurrentScriptPath)
@@ -1076,7 +1126,14 @@ if ($Silent -or $CheckOnly) {
                 if ($result) { Write-Host "  [OK] EQ APO fix applied to $($ci.Client.Name.Trim())" } else { Write-Host "  [FAIL] EQ APO fix failed for $($ci.Client.Name.Trim())" }
             }
         }
-        if ($set.CreateShortcut) { $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $null $null }; if ($spt) { Create-StartupShortcut $spt $set.SilentStartup; Write-Host "  [OK] Startup shortcut created/updated" } }
+        if ($set.CreateShortcut) {
+            $spt = $SAVED_SCRIPT_PATH
+            if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $null $null }
+            if ($spt) {
+                if (Create-StartupShortcut $spt $set.SilentStartup) { Write-Host "  [OK] Startup shortcut created/updated" }
+                else { Write-Host "  [!] Failed to create startup shortcut" }
+            }
+        }
         if ($set.AutoStartDiscord -and $fxc -gt 0 -and $uc.Count -gt 0) { $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." }
         Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
     } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue } }
@@ -1572,8 +1629,10 @@ $btnStart.Add_Click({
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
             $spt = $SAVED_SCRIPT_PATH
             if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
-            if ($spt) { Create-StartupShortcut $spt $chkSilentStartup.Checked; Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
-            else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
+            if ($spt) {
+                if (Create-StartupShortcut $spt $chkSilentStartup.Checked) { Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
+                else { Add-Status $statusBox $form "[!] Failed to create startup shortcut" "Orange" }
+            } else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
         } else { Remove-StartupShortcut }
         Update-Progress $progressBar $form 90
         if ($chkAutoStart.Checked) {
@@ -1710,8 +1769,10 @@ $btnFixAll.Add_Click({
         if ($chkShortcut.Checked) {
             Add-Status $statusBox $form "Creating startup shortcut..." "Blue"
             $spt = $SAVED_SCRIPT_PATH; if (!(Test-Path $spt)) { $spt = Save-ScriptToAppData $statusBox $form }
-            if ($spt) { Create-StartupShortcut $spt $chkSilentStartup.Checked; Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
-            else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
+            if ($spt) {
+                if (Create-StartupShortcut $spt $chkSilentStartup.Checked) { Add-Status $statusBox $form "[OK] Startup shortcut created" "LimeGreen" }
+                else { Add-Status $statusBox $form "[!] Failed to create startup shortcut" "Orange" }
+            } else { Add-Status $statusBox $form "[!] Could not save script - shortcut not created" "Orange" }
         } else { Remove-StartupShortcut }
         if ($chkAutoStart.Checked -and $fxc -gt 0 -and $uc.Count -gt 0) {
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "Starting Discord..." "Blue"

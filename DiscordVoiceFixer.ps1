@@ -377,11 +377,12 @@ function Get-DiscordAppVersion { param([string]$AppPath)
 
 function Start-DiscordClient { param([string]$ExePath)
     if (-not (Test-Path $ExePath)) { return $false }
-    try { Start-Process $ExePath -WindowStyle Normal; return $true } catch { }
-    try { Start-Process "cmd.exe" -ArgumentList "/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true } catch { }
     $updateExe = Join-Path (Split-Path (Split-Path $ExePath -Parent) -Parent) "Update.exe"
     $exeName = Split-Path $ExePath -Leaf
-    if (Test-Path $updateExe) { try { Start-Process $updateExe -ArgumentList "--processStart",$exeName; return $true } catch { } }
+    # Prefer detached launch paths to avoid inheriting the current terminal handles.
+    if (Test-Path $updateExe) { try { Start-Process $updateExe -ArgumentList "--processStart",$exeName -WindowStyle Hidden; return $true } catch { } }
+    try { Start-Process "cmd.exe" -ArgumentList "/d","/c","start",'""',"`"$ExePath`"" -WindowStyle Hidden; return $true } catch { }
+    try { Start-Process $ExePath -WindowStyle Hidden; return $true } catch { }
     return $false
 }
 

@@ -64,7 +64,7 @@ flowchart TD
 
 ## Internal Documentation
 
-### Architecture • Logic Flow • Source Walkthrough
+### Architecture - Logic Flow - Source Walkthrough
 
 This document explains how the script works internally.
 
@@ -386,5 +386,5 @@ Restore flow:
 * Fully reversible, file-level changes
 
 If you skid this and break something,
-that’s on you.
+that's on you.
 

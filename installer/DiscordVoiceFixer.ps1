@@ -1,8 +1,8 @@
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # DISCORD VOICE FIXER - Stereo Audio Module Installer
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # Usage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 param([switch]$Silent, [switch]$CheckOnly, [string]$FixClient, [switch]$Help)
 
@@ -478,11 +478,11 @@ function Reinstall-DiscordClient {
                 "Discord appears to be corrupted because its internal 'modules' folder is missing.`n`n" +
                 "This folder is required for Discord's voice system to function correctly.`n`n" +
                 "To fix this, the installer will perform a safe automatic repair by:`n" +
-                "• Fully closing Discord`n" +
-                "• Removing the broken Discord app files`n" +
-                "• Downloading and installing the latest official Discord version`n" +
-                "• Allowing Discord to rebuild its missing voice modules`n" +
-                "• Applying the stereo / filterless audio fix afterward`n`n" +
+                "- Fully closing Discord`n" +
+                "- Removing the broken Discord app files`n" +
+                "- Downloading and installing the latest official Discord version`n" +
+                "- Allowing Discord to rebuild its missing voice modules`n" +
+                "- Applying the stereo / filterless audio fix afterward`n`n" +
                 "Your Discord account, settings, and login will NOT be removed.`n" +
                 "This only repairs program files and resolves voice module errors.`n`n" +
                 "Would you like to continue?",
@@ -1066,7 +1066,9 @@ if ($Silent -or $CheckOnly) {
     $updatedClients = Get-UpdatedDiscordClients
     if ($set.AutoFixOnDiscordUpdate -and $updatedClients.Count -gt 0) {
         Write-Host "=== DISCORD UPDATE DETECTED ==="
-        foreach ($upd in $updatedClients) { Write-Host "  $($upd.Name.Trim()): v$($upd.OldVersion) -> v$($upd.NewVersion)" }
+        foreach ($upd in $updatedClients) {
+            Write-Host "  $($upd.Name.Trim()): v$($upd.OldVersion) -> v$($upd.NewVersion)"
+        }
         $updatedPaths = $updatedClients | ForEach-Object { $_.AppPath }
         $uc = [System.Collections.ArrayList]@($uc | Where-Object { $_.AppPath -in $updatedPaths })
         Write-Host "Auto-fixing $($uc.Count) updated client(s)..."
@@ -1093,19 +1095,30 @@ if ($Silent -or $CheckOnly) {
         Write-Host "Found $($uc.Count) client(s)"
     }
     
-    if ($uc.Count -eq 0) { Write-Host "No clients to fix."; exit 0 }
-    
-    $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"; EnsureDir $td
+    if ($uc.Count -eq 0) {
+        Write-Host "No clients to fix."
+        exit 0
+    }
+
+    $td = Join-Path $env:TEMP "StereoInstaller_$(Get-Random)"
+    EnsureDir $td
     try {
-        $vbp = Join-Path $td "VoiceBackup"; 
-        if (-not (Download-VoiceBackupFiles $vbp $null $null)) { throw "Download Failed" }
+        $vbp = Join-Path $td "VoiceBackup"
+        if (-not (Download-VoiceBackupFiles $vbp $null $null)) {
+            throw "Download Failed"
+        }
         $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
         $stopResult = Stop-DiscordProcesses $allProcs
-        if (-not $stopResult) { Write-Host "[!] Warning: Some Discord processes may still be running"; Start-Sleep -Seconds 2 }
+        if (-not $stopResult) {
+            Write-Host "[!] Warning: Some Discord processes may still be running"
+            Start-Sleep -Seconds 2
+        }
         Start-Sleep -Seconds 1
         $fxc = 0
         foreach ($ci in $uc) {
-            $cl = $ci.Client; $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
+            $cl = $ci.Client
+            $ap = $ci.AppPath
+            $av = Get-DiscordAppVersion $ap
             Write-Host "Fixing $($cl.Name.Trim()) v$av..."
             try {
                 $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -1114,8 +1127,13 @@ if ($Silent -or $CheckOnly) {
                 Create-VoiceBackup $tvf $cl.Name $av $null $null | Out-Null
                 if (Test-Path $tvf) { Remove-Item "$tvf\*" -Recurse -Force -ErrorAction SilentlyContinue } else { EnsureDir $tvf }
                 Copy-Item "$vbp\*" $tvf -Recurse -Force
-                Save-FixState $cl.Name $av; Write-Host "  [OK] Fixed successfully"; $fxc++
-            } catch { Write-Host "  [FAIL] $($_.Exception.Message)"; Write-Log "Silent fix failed for $($cl.Name): $($_.Exception.Message)" "ERROR" }
+                Save-FixState $cl.Name $av
+                Write-Host "  [OK] Fixed successfully"
+                $fxc++
+            } catch {
+                Write-Host "  [FAIL] $($_.Exception.Message)"
+                Write-Log "Silent fix failed for $($cl.Name): $($_.Exception.Message)" "ERROR"
+            }
         }
         Remove-OldBackups
         if ($set.FixEqApo) {
@@ -1127,7 +1145,11 @@ if ($Silent -or $CheckOnly) {
                 if (-not (Test-Path $roamingPath)) { continue }
                 [void]$processedPaths.Add($roamingPath)
                 $result = Apply-EqApoFix -RoamingPath $roamingPath -ClientName $ci.Client.Name.Trim() -StatusBox $null -Form $null -SkipConfirmation $true
-                if ($result) { Write-Host "  [OK] EQ APO fix applied to $($ci.Client.Name.Trim())" } else { Write-Host "  [FAIL] EQ APO fix failed for $($ci.Client.Name.Trim())" }
+                if ($result) {
+                    Write-Host "  [OK] EQ APO fix applied to $($ci.Client.Name.Trim())"
+                } else {
+                    Write-Host "  [FAIL] EQ APO fix failed for $($ci.Client.Name.Trim())"
+                }
             }
         }
         if ($set.CreateShortcut) {
@@ -1143,8 +1165,13 @@ if ($Silent -or $CheckOnly) {
             $de = Join-Path $pc.AppPath $pc.Client.Exe
             if (-not (Start-DiscordClient $de)) { Write-Log "Auto-start Discord failed in silent mode (post-fix path)" "WARN" }
         }
-        Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
-    } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue } }
+        Write-Host "Fixed $fxc of $($uc.Count) client(s)"
+        exit 0
+    } finally {
+        if (Test-Path $td) {
+            Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 #endregion

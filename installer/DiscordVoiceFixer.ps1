@@ -1076,11 +1076,14 @@ if ($Silent -or $CheckOnly) {
             if (-not $checkResult -or -not $checkResult.LastFixDate) { $needsFix = $true; break }
         }
         if (-not $needsFix) {
-            Write-Host "No Discord updates detected. All clients are up to date."
+            $shouldAutoStart = $set.AutoStartDiscord -and $uc.Count -gt 0
+            if (-not $shouldAutoStart) {
+                Write-Host "No Discord updates detected. All clients are up to date."
+            }
             Write-Log "Silent mode: No updates detected, skipping fix"
-            if ($set.AutoStartDiscord -and $uc.Count -gt 0) { 
+            if ($shouldAutoStart) {
                 $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe
-                Start-DiscordClient $de; Write-Host "Discord started."
+                if (-not (Start-DiscordClient $de)) { Write-Log "Auto-start Discord failed in silent mode (no updates path)" "WARN" }
             }
             exit 0
         }
@@ -1134,7 +1137,11 @@ if ($Silent -or $CheckOnly) {
                 else { Write-Host "  [!] Failed to create startup shortcut" }
             }
         }
-        if ($set.AutoStartDiscord -and $fxc -gt 0 -and $uc.Count -gt 0) { $pc = $uc[0]; $de = Join-Path $pc.AppPath $pc.Client.Exe; Start-DiscordClient $de; Write-Host "Discord started." }
+        if ($set.AutoStartDiscord -and $fxc -gt 0 -and $uc.Count -gt 0) {
+            $pc = $uc[0]
+            $de = Join-Path $pc.AppPath $pc.Client.Exe
+            if (-not (Start-DiscordClient $de)) { Write-Log "Auto-start Discord failed in silent mode (post-fix path)" "WARN" }
+        }
         Write-Host "Fixed $fxc of $($uc.Count) client(s)"; exit 0
     } finally { if (Test-Path $td) { Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue } }
 }

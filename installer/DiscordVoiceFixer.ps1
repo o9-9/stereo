@@ -293,66 +293,74 @@ function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar,
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $mainNames = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","Vencord","Equicord","BetterVencord")
     $toKill = $ProcessNames | Where-Object { $_ -in $mainNames }
-    foreach ($n in $toKill) {
-        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
-    }
-    try {
-        $updateProcs = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
-            $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
-        }
-        foreach ($u in $updateProcs) {
-            try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
-        }
-    } catch { }
-    Start-Sleep -Milliseconds 300
-    foreach ($n in $toKill) {
-        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
-    }
-    $deadline = [DateTime]::UtcNow.AddSeconds(12)
-    $checkNames = $toKill + @("Update")
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $remaining = $null
+    $discordPathRegex = "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+
+    # Helper: get Discord-related Update.exe PIDs without slow WMI filter on full process list
+    $getDiscordUpdatePids = {
         try {
-            $remaining = Get-Process -Name $checkNames -ErrorAction SilentlyContinue
-        } catch { }
+            $up = Get-Process -Name "Update" -ErrorAction SilentlyContinue
+            if (-not $up) { return @() }
+            $pids = @()
+            foreach ($p in $up) {
+                try {
+                    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue
+                    if ($cim -and $cim.ExecutablePath -and $cim.ExecutablePath -match $discordPathRegex) { $pids += $p.Id }
+                } catch { }
+            }
+            return $pids
+        } catch { return @() }
+    }
+
+    # Fire all main process kills without blocking (taskkill returns quickly when process exits)
+    foreach ($n in $toKill) {
+        try { & taskkill /F /IM "$n.exe" 2>$null | Out-Null } catch { }
+    }
+    $updatePids = & $getDiscordUpdatePids
+    foreach ($upId in $updatePids) {
+        try { & taskkill /F /PID $upId 2>$null | Out-Null } catch { }
+    }
+    Start-Sleep -Milliseconds 400
+    foreach ($n in $toKill) {
+        try { & taskkill /F /IM "$n.exe" 2>$null | Out-Null } catch { }
+    }
+
+    # Shorter poll: up to 5s, sleep only when we actually killed something this round
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $checkNames = @($toKill) + @("Update")
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $remaining = Get-Process -Name $checkNames -ErrorAction SilentlyContinue
+        $killed = $false
         if ($remaining) {
             foreach ($r in $remaining) {
                 $pathOk = $true
                 if ($r.Name -eq "Update") {
                     try {
                         $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($r.Id)" -ErrorAction SilentlyContinue
-                        $pathOk = $cim -and $cim.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+                        $pathOk = $cim -and $cim.ExecutablePath -match $discordPathRegex
                     } catch { $pathOk = $false }
                 }
                 if ($pathOk) {
-                    try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$r.Id -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+                    try { & taskkill /F /PID $r.Id 2>$null | Out-Null; $killed = $true } catch { }
                 }
-            }
-        } else {
-            $updateLeft = $null
-            try {
-                $updateLeft = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
-                    $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
-                }
-            } catch { }
-            if (-not $updateLeft) { return $true }
-            foreach ($u in $updateLeft) {
-                try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
             }
         }
-        Start-Sleep -Milliseconds 250
+        if (-not $remaining -or -not $killed) {
+            $updatePids = & $getDiscordUpdatePids
+            if ($updatePids.Count -eq 0) { return $true }
+            foreach ($upId in $updatePids) {
+                try { & taskkill /F /PID $upId 2>$null | Out-Null; $killed = $true } catch { }
+            }
+            if (-not $killed) { return $true }
+        }
+        Start-Sleep -Milliseconds 200
     }
     foreach ($n in $toKill) {
-        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+        try { & taskkill /F /IM "$n.exe" 2>$null | Out-Null } catch { }
     }
-    try {
-        $updateProcs = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
-            $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
-        }
-        foreach ($u in $updateProcs) {
-            try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
-        }
-    } catch { }
+    $updatePids = & $getDiscordUpdatePids
+    foreach ($upId in $updatePids) {
+        try { & taskkill /F /PID $upId 2>$null | Out-Null } catch { }
+    }
     return $true
 }
 

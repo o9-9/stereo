@@ -1304,7 +1304,7 @@ function Invoke-PatchClients {
                 throw "Patcher exited with code $($patchProc.ExitCode)"
             }
         } catch {
-            Write-Log "Failed to patch $clientName: $_" -Level Error
+            Write-Log "Failed to patch ${clientName}: $_" -Level Error
             [void]$failedClients.Add($clientName)
         }
     }

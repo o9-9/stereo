@@ -290,36 +290,69 @@ function Update-Progress { param([System.Windows.Forms.ProgressBar]$ProgressBar,
 
 #region DISCORD PROCESS & PATH MANAGEMENT
 
-# Stops Discord processes (only kills Update.exe if in Discord directory)
 function Stop-DiscordProcesses { param([string[]]$ProcessNames)
-    $discordProcesses = $ProcessNames | Where-Object { $_ -ne "Update" }
-    $allProcesses = $discordProcesses + @("Update")
-    $p = Get-Process -Name $allProcesses -ErrorAction SilentlyContinue | Where-Object {
-        if ($_.Name -eq "Update") {
-            try { $path = $_.MainModule.FileName; return $path -match "Discord|Lightcord|Vencord|Equicord|BetterVencord" } catch { return $false }
-        }
-        return $true
+    $mainNames = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","Vencord","Equicord","BetterVencord")
+    $toKill = $ProcessNames | Where-Object { $_ -in $mainNames }
+    foreach ($n in $toKill) {
+        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
     }
-    if ($p) {
-        # First attempt: Stop-Process
-        $p | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 500
-        # Second attempt: taskkill /F as fallback for stubborn processes
-        $remaining = Get-Process -Name $allProcesses -ErrorAction SilentlyContinue
+    try {
+        $updateProcs = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+        }
+        foreach ($u in $updateProcs) {
+            try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch { }
+    Start-Sleep -Milliseconds 300
+    foreach ($n in $toKill) {
+        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(12)
+    $checkNames = $toKill + @("Update")
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $remaining = $null
+        try {
+            $remaining = Get-Process -Name $checkNames -ErrorAction SilentlyContinue
+        } catch { }
         if ($remaining) {
-            foreach ($proc in $remaining) {
-                try { & taskkill /F /PID $proc.Id 2>$null | Out-Null } catch { }
+            foreach ($r in $remaining) {
+                $pathOk = $true
+                if ($r.Name -eq "Update") {
+                    try {
+                        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($r.Id)" -ErrorAction SilentlyContinue
+                        $pathOk = $cim -and $cim.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+                    } catch { $pathOk = $false }
+                }
+                if ($pathOk) {
+                    try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$r.Id -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+                }
             }
-            Start-Sleep -Milliseconds 500
+        } else {
+            $updateLeft = $null
+            try {
+                $updateLeft = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
+                    $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+                }
+            } catch { }
+            if (-not $updateLeft) { return $true }
+            foreach ($u in $updateLeft) {
+                try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+            }
         }
-        # Wait up to 10 seconds for processes to fully exit
-        for ($i=0; $i -lt 40; $i++) {
-            $remaining = Get-Process -Name $discordProcesses -ErrorAction SilentlyContinue
-            if (-not $remaining) { return $true }
-            Start-Sleep -Milliseconds 250
-        }
-        return $false
+        Start-Sleep -Milliseconds 250
     }
+    foreach ($n in $toKill) {
+        try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/IM","$n.exe" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+    }
+    try {
+        $updateProcs = Get-CimInstance Win32_Process -Filter "Name='Update.exe'" -ErrorAction SilentlyContinue | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath -match "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
+        }
+        foreach ($u in $updateProcs) {
+            try { Start-Process -FilePath "taskkill" -ArgumentList "/F","/PID",$u.ProcessId -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch { }
     return $true
 }
 
@@ -1630,11 +1663,12 @@ $btnStart.Add_Click({
         Update-Progress $progressBar $form 40
         Add-Status $statusBox $form "" "White"
         Add-Status $statusBox $form "Closing Discord processes..." "Blue"
-        $stopResult = Stop-DiscordProcesses $sc.Processes
+        $allProcs = @("Discord","DiscordCanary","DiscordPTB","DiscordDevelopment","Lightcord","BetterVencord","Equicord","Vencord","Update")
+        $stopResult = Stop-DiscordProcesses $allProcs
         if (-not $stopResult) {
             Add-Status $statusBox $form "[!] Warning: Some processes may still be running, retrying..." "Orange"
-            Start-Sleep -Seconds 3
-            $stopResult = Stop-DiscordProcesses $sc.Processes
+            Start-Sleep -Seconds 2
+            $stopResult = Stop-DiscordProcesses $allProcs
             if (-not $stopResult) {
                 throw "Could not close all Discord processes. Please close Discord manually (check system tray) and try again."
             }
@@ -1769,7 +1803,7 @@ $btnFixAll.Add_Click({
         $stopResult = Stop-DiscordProcesses $allProcs
         if (-not $stopResult) {
             Add-Status $statusBox $form "[!] Warning: Some processes may still be running, retrying..." "Orange"
-            Start-Sleep -Seconds 3
+            Start-Sleep -Seconds 2
             $stopResult = Stop-DiscordProcesses $allProcs
             if (-not $stopResult) {
                 throw "Could not close all Discord processes. Please close Discord manually (check system tray) and try again."

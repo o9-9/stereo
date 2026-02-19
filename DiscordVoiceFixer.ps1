@@ -295,7 +295,6 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
     $toKill = $ProcessNames | Where-Object { $_ -in $mainNames }
     $discordPathRegex = "\\Discord|\\Lightcord|\\Vencord|\\Equicord|\\BetterVencord"
 
-    # Helper: get Discord-related Update.exe PIDs without slow WMI filter on full process list
     $getDiscordUpdatePids = {
         try {
             $up = Get-Process -Name "Update" -ErrorAction SilentlyContinue
@@ -311,7 +310,6 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
         } catch { return @() }
     }
 
-    # Fire all main process kills without blocking (taskkill returns quickly when process exits)
     foreach ($n in $toKill) {
         try { & taskkill /F /IM "$n.exe" 2>$null | Out-Null } catch { }
     }
@@ -324,7 +322,6 @@ function Stop-DiscordProcesses { param([string[]]$ProcessNames)
         try { & taskkill /F /IM "$n.exe" 2>$null | Out-Null } catch { }
     }
 
-    # Shorter poll: up to 5s, sleep only when we actually killed something this round
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     $checkNames = @($toKill) + @("Update")
     while ([DateTime]::UtcNow -lt $deadline) {

@@ -230,7 +230,7 @@ function Get-UpdatedDiscordClients {
             })
         }
     }
-    return $updatedClients
+    return ,$updatedClients
 }
 
 #endregion
@@ -469,7 +469,7 @@ function Get-InstalledClients {
             if ($ap) { [void]$inst.Add(@{Index=$k; Name=$c.Name; Path=$fp; AppPath=$ap; Client=$c}); [void]$foundPaths.Add($fp) } 
         }
     }
-    return $inst
+    return ,$inst
 }
 
 #endregion
@@ -569,7 +569,7 @@ function Reinstall-DiscordClient {
             return $false
         }
         Add-Status $StatusBox $Form "Releasing voice module lock..." "Cyan"
-        Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process -Name "Discord","DiscordCanary","DiscordPTB","DiscordDevelopment" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         $voiceNodePath = Join-Path $newDiag.VoiceModulePath "discord_voice.node"
         for ($i = 0; $i -lt 10; $i++) {
             try {
@@ -1782,7 +1782,7 @@ $btnFixAll.Add_Click({
             Add-Status $statusBox $form "" "White"; Add-Status $statusBox $form "=== Fixing: $($ci.Name.Trim()) ===" "Blue"
             try {
                 $ap = $ci.AppPath; $av = Get-DiscordAppVersion $ap
-                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory | Select-Object -First 1
+                $vm = Get-ChildItem "$ap\modules" -Filter "discord_voice*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
                 if (-not $vm) { throw "No discord_voice module found" }
                 $tvf = if (Test-Path "$($vm.FullName)\discord_voice") { "$($vm.FullName)\discord_voice" } else { $vm.FullName }
                 Add-Status $statusBox $form "  Creating backup..." "Cyan"

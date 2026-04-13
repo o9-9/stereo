@@ -3,6 +3,9 @@ name: Combine Repos Chronologically
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   combine:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
 
       - name: Prepare workspace
         run: |
-          mkdir work patches
+          mkdir -p work patches
 
       - name: Clone source repos
         run: |
@@ -65,13 +68,16 @@ jobs:
 
       - name: Apply patches
         run: |
-          git checkout -b combined || true
+          git checkout -B main
 
           for p in patches/*.patch; do
             git am --keep-non-patch "$p" || git am --skip
           done
 
       - name: Push result
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git branch -M main
+          git config --global --unset-all http.https://github.com/.extraheader || true
+          git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
           git push origin main --force

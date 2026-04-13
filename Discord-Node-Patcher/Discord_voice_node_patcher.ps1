@@ -14,8 +14,115 @@ $ProgressPreference = 'SilentlyContinue'
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction SilentlyContinue
 
-$Script:UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/Discord-Node-Patcher-Feb-9-2026/main/Discord_voice_node_patcher.ps1"
-$Script:SCRIPT_VERSION = "5.0"
+# Canonical source (same tree as Stereo Hub / Linux bundle)
+$Script:UPDATE_URL_BASE = "https://raw.githubusercontent.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/main/Updates/Windows/Discord_voice_node_patcher.ps1"
+$Script:SCRIPT_VERSION = "6"
+
+# region Offsets (PASTE HERE)
+# Paste output from: python discord_voice_node_offset_finder_v5.py <path\to\discord_voice.node>
+# Required: exactly these 17 offsets (RVA hex). Copy the "COPY BELOW -> Discord_voice_node_patcher.ps1" block.
+
+$Script:OffsetsMeta = @{
+    FinderVersion = "discord_voice_node_offset_finder.py v5.1"
+    Build         = "Mar 23 2026"
+    Size          = 14395320
+    MD5           = "1550d7ceeef04e81435ad87e7409f0f3"
+}
+
+$Script:Offsets = @{
+    CreateAudioFrameStereo            = 0x11A351
+    AudioEncoderOpusConfigSetChannels = 0x3AD144
+    MonoDownmixer                     = 0xD9569
+    EmulateStereoSuccess1             = 0x5441FB
+    EmulateStereoSuccess2             = 0x544207
+    EmulateBitrateModified            = 0x54465A
+    SetsBitrateBitrateValue           = 0x546481
+    SetsBitrateBitwiseOr              = 0x546489
+    Emulate48Khz                      = 0x544363
+    HighPassFilter                    = 0x550470
+    HighpassCutoffFilter              = 0x8CCFB0
+    DcReject                          = 0x8CD190
+    DownmixFunc                       = 0x8C9320
+    AudioEncoderOpusConfigIsOk        = 0x3AD3E0
+    ThrowError                        = 0x2C2FE0
+    EncoderConfigInit1                = 0x3AD14E
+    EncoderConfigInit2                = 0x3ACA57
+}
+
+# endregion Offsets
+
+# Single source of truth: 17 offsets required (order matches finder copy-block)
+$Script:RequiredOffsetNames = @(
+    "CreateAudioFrameStereo", "AudioEncoderOpusConfigSetChannels", "MonoDownmixer",
+    "EmulateStereoSuccess1", "EmulateStereoSuccess2", "EmulateBitrateModified",
+    "SetsBitrateBitrateValue", "SetsBitrateBitwiseOr", "Emulate48Khz",
+    "HighPassFilter", "HighpassCutoffFilter", "DcReject", "DownmixFunc",
+    "AudioEncoderOpusConfigIsOk", "ThrowError",
+    "EncoderConfigInit1", "EncoderConfigInit2"
+)
+
+# region Patch Definitions
+
+$Script:PatchGroups = [ordered]@{
+    STEREO = [ordered]@{
+        EmulateStereoSuccess1 = @{ Name = "EmulateStereoSuccess1 (channels=2)"; Hex = "02" }
+        EmulateStereoSuccess2 = @{ Name = "EmulateStereoSuccess2 (jne->jmp)"; Hex = "EB" }
+        CreateAudioFrameStereo = @{ Name = "CreateAudioFrameStereo"; Hex = "49 89 C5 90" }
+        AudioEncoderOpusConfigSetChannels = @{ Name = "AudioEncoderConfigSetChannels (ch=2)"; Hex = "02" }
+        MonoDownmixer = @{ Name = "MonoDownmixer (NOP sled + JMP)"; Hex = "90 90 90 90 90 90 90 90 90 90 90 90 E9" }
+    }
+    BITRATE = [ordered]@{
+        EmulateBitrateModified = @{ Name = "EmulateBitrateModified (384kbps)"; Hex = "00 DC 05" }
+        SetsBitrateBitrateValue = @{ Name = "SetsBitrateBitrateValue (384kbps)"; Hex = "00 DC 05 00 00" }
+        SetsBitrateBitwiseOr = @{ Name = "SetsBitrateBitwiseOr (NOP)"; Hex = "90 90 90" }
+    }
+    SAMPLERATE = [ordered]@{
+        Emulate48Khz = @{ Name = "Emulate48Khz (NOP cmovb)"; Hex = "90 90 90" }
+    }
+    FILTER = [ordered]@{
+        HighPassFilter = @{ Name = "HighPassFilter (RET stub)"; Hex = "mov rax, imm64; ret" }
+        HighpassCutoffFilter = @{ Name = "HighpassCutoffFilter (inject hp_cutoff)"; Hex = "shellcode" }
+        DcReject = @{ Name = "DcReject (inject dc_reject)"; Hex = "shellcode" }
+        DownmixFunc = @{ Name = "DownmixFunc (RET)"; Hex = "C3" }
+        AudioEncoderOpusConfigIsOk = @{ Name = "AudioEncoderConfigIsOk (RET true)"; Hex = "48 C7 C0 01 ... C3" }
+        ThrowError = @{ Name = "ThrowError (RET)"; Hex = "C3" }
+    }
+    ENCODER = [ordered]@{
+        EncoderConfigInit1 = @{ Name = "EncoderConfigInit1 (32000->384000)"; Hex = "00 DC 05 00" }
+        EncoderConfigInit2 = @{ Name = "EncoderConfigInit2 (32000->384000)"; Hex = "00 DC 05 00" }
+    }
+}
+
+$Script:AllPatchKeys = [System.Collections.Generic.List[string]]::new()
+foreach ($grp in $Script:PatchGroups.Values) {
+    foreach ($k in $grp.Keys) { $Script:AllPatchKeys.Add($k) }
+}
+
+$Script:SelectedPatches = @{}
+foreach ($k in $Script:AllPatchKeys) { $Script:SelectedPatches[$k] = $true }
+
+# endregion Patch Definitions
+
+# region Console
+function Wait-EnterOrTimeout {
+    param([int]$Seconds = 60)
+    $msg = "Press Enter to exit (auto-close in ${Seconds}s)..."
+    try {
+        Write-Host $msg
+        $end = [DateTime]::UtcNow.AddSeconds($Seconds)
+        while ([DateTime]::UtcNow -lt $end) {
+            if ([Console]::KeyAvailable) {
+                $k = [Console]::ReadKey($true)
+                if ($k.Key -eq 'Enter') { return }
+            }
+            Start-Sleep -Milliseconds 300
+        }
+    } catch {
+        Start-Sleep -Seconds $Seconds
+    }
+}
+
+# endregion Console
 
 # region Auto-Elevation
 
@@ -35,7 +142,7 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
         exit 0
     } catch {
         Write-Host "ERROR: Failed to elevate. Please run as Administrator manually." -ForegroundColor Red
-        Read-Host "Press Enter to exit"; exit 1
+        Wait-EnterOrTimeout; exit 1
     }
 }
 
@@ -45,35 +152,16 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 
 $Script:GainExplicitlySet = $PSBoundParameters.ContainsKey('AudioGainMultiplier')
 $Script:Config = @{
-    SampleRate = 48000; Bitrate = 400; Channels = "Stereo"
+    SampleRate = 48000; Bitrate = 384; Channels = "Stereo"
     AudioGainMultiplier = $AudioGainMultiplier; SkipBackup = $SkipBackup.IsPresent; AutoRelaunch = $true
     ModuleName = "discord_voice.node"
     TempDir = "$env:TEMP\DiscordVoicePatcher"; BackupDir = "$env:TEMP\DiscordVoicePatcher\Backups"
     LogFile = "$env:TEMP\DiscordVoicePatcher\patcher.log"; ConfigFile = "$env:TEMP\DiscordVoicePatcher\config.json"
     MaxBackupCount = 10
-    VoiceBackupAPI = "https://api.github.com/repos/ProdHallow/Discord-Node-Patcher-Feb-9-2026/contents/discord_voice"
-     # Auto-generated by discord_voice_node_offset_finder.py v5.0
-    # Build: Feb 17 2026 | Size: 14296504 | MD5: e0b7be3c766406a5b2a7be412e3610d7
-    Offsets = @{
-        CreateAudioFrameStereo            = 0x118E11
-        AudioEncoderOpusConfigSetChannels = 0x3A72A4
-        MonoDownmixer                     = 0xD8019
-        EmulateStereoSuccess1             = 0x538D2B
-        EmulateStereoSuccess2             = 0x538D37
-        EmulateBitrateModified            = 0x53918A
-        SetsBitrateBitrateValue           = 0x53AFB1
-        SetsBitrateBitwiseOr              = 0x53AFB9
-        Emulate48Khz                      = 0x538E93
-        HighPassFilter                    = 0x544FA0
-        HighpassCutoffFilter              = 0x8BD4C0
-        DcReject                          = 0x8BD6A0
-        DownmixFunc                       = 0x8B9830
-        AudioEncoderOpusConfigIsOk        = 0x3A7540
-        ThrowError                        = 0x2BFF70
-        DuplicateEmulateBitrateModified   = 0x53E070
-        EncoderConfigInit1                = 0x3A72AE
-        EncoderConfigInit2                = 0x3A6BB7
-    }
+    # Browser: https://github.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/tree/main/Updates/Nodes/Unpatched%20Nodes%20(For%20Patcher)/Windows
+    VoiceBackupAPI = "https://api.github.com/repos/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/contents/Updates%2FNodes%2FUnpatched%20Nodes%20%28For%20Patcher%29%2FWindows"
+    OffsetsMeta = $Script:OffsetsMeta
+    Offsets     = $Script:Offsets
 }
 $Script:DoFixAll = $false
 
@@ -91,6 +179,25 @@ $Script:DiscordClients = [ordered]@{
 
 # endregion Configuration
 
+# region Voice Node Helpers
+function Get-FileMd5Hex {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+            return (Get-FileHash -Path $Path -Algorithm MD5).Hash.ToLowerInvariant()
+        }
+    } catch { }
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $md5.ComputeHash($fs)
+            return ([System.BitConverter]::ToString($hashBytes) -replace '-','').ToLowerInvariant()
+        } finally { $fs.Dispose() }
+    } finally { $md5.Dispose() }
+}
+# endregion Voice Node Helpers
+
 # region Logging
 
 function Write-Log {
@@ -105,7 +212,7 @@ function Write-Log {
 
 function Write-Banner {
     Write-Host "`n===== Discord Voice Quality Patcher v$Script:SCRIPT_VERSION =====" -ForegroundColor Cyan
-    Write-Host "      48kHz | 400kbps | Stereo | Gain Config" -ForegroundColor Cyan
+    Write-Host "      48kHz | 384kbps | Stereo | Gain Config" -ForegroundColor Cyan
     Write-Host "         Multi-Client Detection Enabled" -ForegroundColor Cyan
     Write-Host " Requires C++ build tools (VS workload or MinGW/Clang)" -ForegroundColor Yellow
     Write-Host "===============================================`n" -ForegroundColor Cyan
@@ -152,20 +259,88 @@ function Get-UserConfig {
 
 function EnsureDir($p) { if ($p -and -not (Test-Path $p)) { try { [void](New-Item $p -ItemType Directory -Force) } catch { } } }
 
+function Get-OffsetsCopyBlock {
+    $meta = $Script:OffsetsMeta
+    $offs = $Script:Offsets
+    if (-not $meta -or -not $offs) { throw "Offsets not loaded" }
+    $offsetOrder = $Script:RequiredOffsetNames
+    $maxLen = ($offsetOrder | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    $lines = @(
+        "# region Offsets (PASTE HERE)",
+        "",
+        "`$Script:OffsetsMeta = @{",
+        "    FinderVersion = `"$($meta.FinderVersion)`"",
+        "    Build         = `"$($meta.Build)`"",
+        "    Size          = $($meta.Size)",
+        "    MD5           = `"$($meta.MD5)`"",
+        "}",
+        "",
+        "`$Script:Offsets = @{"
+    )
+    foreach ($k in $offsetOrder) {
+        $val = $offs[$k]
+        if ($null -eq $val) { continue }
+        $pad = " " * ($maxLen - $k.Length)
+        $lines += "    $k$pad = 0x$($val.ToString('X').ToUpperInvariant())"
+    }
+    $lines += "}"
+    $lines += ""
+    $lines += "# endregion Offsets"
+    $lines -join "`n"
+}
+
 # endregion User Config Persistence
 
 # region Auto-Update
 
+function Get-PatcherRestartHelperScriptContent {
+    param([Parameter(Mandatory)][string]$TargetScriptPath)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add('-NoProfile')
+    $parts.Add('-ExecutionPolicy')
+    $parts.Add('Bypass')
+    $parts.Add('-File')
+    $parts.Add($TargetScriptPath)
+    # Read script-scope param() values (nested function does not see script $PSBoundParameters)
+    $parts.Add('-AudioGainMultiplier')
+    $parts.Add([string]$script:AudioGainMultiplier)
+    if ($script:SkipBackup) { $parts.Add('-SkipBackup') }
+    if ($script:Restore) { $parts.Add('-Restore') }
+    if ($script:ListBackups) { $parts.Add('-ListBackups') }
+    if ($script:FixAll) { $parts.Add('-FixAll') }
+    if (-not [string]::IsNullOrWhiteSpace([string]$script:FixClient)) {
+        $parts.Add('-FixClient')
+        $parts.Add([string]$script:FixClient)
+    }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('$ErrorActionPreference = "Stop"')
+    [void]$sb.Append('$p = @(')
+    for ($i = 0; $i -lt $parts.Count; $i++) {
+        if ($i -gt 0) { [void]$sb.Append(',') }
+        $esc = $parts[$i] -replace "'", "''"
+        [void]$sb.Append("'$esc'")
+    }
+    [void]$sb.AppendLine(')')
+    [void]$sb.AppendLine('Start-Process -FilePath "powershell.exe" -ArgumentList $p -WindowStyle Normal')
+    return $sb.ToString()
+}
+
 function Check-ForUpdate {
     try {
-        Write-Log "Checking for script updates..." -Level Info
+        Write-Log "Checking for script updates from GitHub (no-cache)..." -Level Info
         if ([string]::IsNullOrEmpty($PSCommandPath)) {
-            Write-Log "Running latest version from web" -Level Success
+            Write-Log "Running from memory / web; skip self-update check" -Level Success
             return @{ UpdateAvailable = $false; Reason = "WebExecution" }
         }
         $tempFile = Join-Path $env:TEMP "DiscordVoicePatcher_Update_$(Get-Random).ps1"
         try {
-            Invoke-WebRequest -Uri $Script:UPDATE_URL -OutFile $tempFile -UseBasicParsing -TimeoutSec 15 | Out-Null
+            $ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $updateUri = "$($Script:UPDATE_URL_BASE)$([char]0x3F)t=$ts&r=$(Get-Random)"
+            $headers = @{
+                'Cache-Control' = 'no-cache'
+                'Pragma'        = 'no-cache'
+            }
+            Invoke-WebRequest -Uri $updateUri -OutFile $tempFile -UseBasicParsing -TimeoutSec 30 -Headers $headers | Out-Null
         } catch {
             Write-Log "Could not check for updates: $($_.Exception.Message)" -Level Warning
             return @{ UpdateAvailable = $false; Reason = "NetworkError"; Error = $_.Exception.Message }
@@ -175,31 +350,18 @@ function Check-ForUpdate {
         $localContent = (Get-Content $PSCommandPath -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
         $remoteContent = $remoteContent.Trim()
         $localContent = $localContent.Trim()
-        if ($remoteContent -ne $localContent) {
-            $remoteVersion = "Unknown"
-            if ($remoteContent -match 'SCRIPT_VERSION\s*=\s*"([^"]+)"') { $remoteVersion = $matches[1] }
-            # Prevent downgrade: only offer update if remote version is actually newer
-            try {
-                $localVer = [version]($Script:SCRIPT_VERSION -replace '[^0-9.]','')
-                $remoteVer = [version]($remoteVersion -replace '[^0-9.]','')
-                if ($remoteVer -le $localVer) {
-                    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                    Write-Log "Remote version v$remoteVersion is not newer than local v$Script:SCRIPT_VERSION - skipping" -Level Success
-                    return @{ UpdateAvailable = $false; Reason = "LocalIsNewer" }
-                }
-            } catch {
-                # If version parsing fails, fall through to offer update with warning
-                Write-Log "Could not compare versions (local=$Script:SCRIPT_VERSION, remote=$remoteVersion)" -Level Warning
-            }
-            Write-Log "Update available! (v$Script:SCRIPT_VERSION -> v$remoteVersion)" -Level Warning
-            return @{ UpdateAvailable = $true; TempFile = $tempFile; RemoteVersion = $remoteVersion; LocalVersion = $Script:SCRIPT_VERSION }
-        } else {
+        if ($remoteContent -eq $localContent) {
             Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-            Write-Log "You are on the latest version (v$Script:SCRIPT_VERSION)" -Level Success
+            Write-Log "Script matches GitHub (byte-for-byte)." -Level Success
             return @{ UpdateAvailable = $false; Reason = "UpToDate" }
         }
+        $remoteVersion = "Unknown"
+        if ($remoteContent -match '\$Script:SCRIPT_VERSION\s*=\s*"([^"]+)"') { $remoteVersion = $matches[1] }
+        Write-Log "GitHub copy differs from local file - syncing (v$Script:SCRIPT_VERSION -> v$remoteVersion)." -Level Warning
+        return @{ UpdateAvailable = $true; TempFile = $tempFile; RemoteVersion = $remoteVersion; LocalVersion = $Script:SCRIPT_VERSION }
     } catch {
         Write-Log "Update check failed: $($_.Exception.Message)" -Level Warning
+        if ($tempFile -and (Test-Path $tempFile)) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         return @{ UpdateAvailable = $false; Reason = "Error"; Error = $_.Exception.Message }
     }
 }
@@ -208,9 +370,36 @@ function Apply-ScriptUpdate {
     param([string]$UpdatedScriptPath, [string]$CurrentScriptPath, [switch]$RestartAfter)
     if (-not (Test-Path $UpdatedScriptPath)) { Write-Log "Update file not found: $UpdatedScriptPath" -Level Error; return $false }
     $batchFile = Join-Path $env:TEMP "DiscordVoicePatcher_Update.bat"
-    $batchContent = "@echo off`necho Applying update...`ntimeout /t 2 /nobreak >nul`ncopy /Y `"$UpdatedScriptPath`" `"$CurrentScriptPath`" >nul`nif errorlevel 1 (`n    echo Failed to copy update file!`n    pause`n    exit /b 1`n)`necho Update applied successfully!`ntimeout /t 1 /nobreak >nul"
-    if ($RestartAfter) { $batchContent += "`necho Restarting script...`npowershell.exe -ExecutionPolicy Bypass -File `"$CurrentScriptPath`"" }
-    $batchContent += "`ndel `"$UpdatedScriptPath`" >nul 2>&1`n(goto) 2>nul & del `"%~f0`""
+    # Build .bat with single-quoted lines only: "..." would parse >nul, 2>&1, & as PowerShell redirection/operators.
+    $bl = [System.Collections.Generic.List[string]]::new()
+    [void]$bl.Add('@echo off')
+    [void]$bl.Add('echo Applying update...')
+    [void]$bl.Add('timeout /t 2 /nobreak >nul')
+    [void]$bl.Add(('copy /Y "{0}" "{1}" >nul' -f $UpdatedScriptPath, $CurrentScriptPath))
+    [void]$bl.Add('if errorlevel 1 (')
+    [void]$bl.Add('    echo Failed to copy update file!')
+    [void]$bl.Add('    pause')
+    [void]$bl.Add('    exit /b 1')
+    [void]$bl.Add(')')
+    [void]$bl.Add('echo Update applied successfully!')
+    [void]$bl.Add('timeout /t 1 /nobreak >nul')
+    if ($RestartAfter) {
+        $restartPs1 = Join-Path $env:TEMP "DiscordVoicePatcher_Restart_$([Guid]::NewGuid().ToString('N')).ps1"
+        $restartBody = Get-PatcherRestartHelperScriptContent -TargetScriptPath $CurrentScriptPath
+        try {
+            Set-Content -LiteralPath $restartPs1 -Value $restartBody -Encoding UTF8 -Force
+            [void]$bl.Add('echo Restarting script...')
+            [void]$bl.Add(('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $restartPs1))
+            [void]$bl.Add(('del "{0}" >nul 2>&1' -f $restartPs1))
+        } catch {
+            Write-Log "Could not write restart helper; launching script without extra args." -Level Warning
+            [void]$bl.Add('echo Restarting script...')
+            [void]$bl.Add(('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $CurrentScriptPath))
+        }
+    }
+    [void]$bl.Add(('del "{0}" >nul 2>&1' -f $UpdatedScriptPath))
+    [void]$bl.Add('(goto) 2>nul & del "%~f0"')
+    $batchContent = $bl -join "`r`n"
     $batchContent | Out-File $batchFile -Encoding ASCII -Force
     Write-Log "Update will be applied after script closes..." -Level Info
     Start-Process "cmd.exe" -ArgumentList "/c", "`"$batchFile`"" -WindowStyle Hidden
@@ -252,7 +441,7 @@ function Download-VoiceBackupFiles {
                     if ($fileInfo.Length -eq 0) { throw "Downloaded file is empty" }
                     $ext = [System.IO.Path]::GetExtension($file.name).ToLower()
                     if (($ext -eq ".node" -or $ext -eq ".dll") -and $fileInfo.Length -lt 1024) {
-                        Write-Log "  [!] Warning: $($file.name) seems too small ($($fileInfo.Length) bytes)" -Level Warning
+                        Write-Log "  [!] Warning: $($file.name) seems too small $($fileInfo.Length) bytes" -Level Warning
                     }
                     $fileCount++
                 } catch {
@@ -281,7 +470,7 @@ function Get-PathFromProcess {
     try {
         $p = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($p -and $p.MainModule -and $p.MainModule.FileName) { return (Split-Path (Split-Path $p.MainModule.FileName -Parent) -Parent) }
-    } catch {}
+    } catch { }
     return $null
 }
 
@@ -298,11 +487,15 @@ function Get-PathFromShortcuts {
         foreach ($lf in $scs) {
             try {
                 $sc = $ws.CreateShortcut($lf.FullName)
-                if ($sc.TargetPath -and (Test-Path $sc.TargetPath)) { return (Split-Path $sc.TargetPath -Parent) }
+                try {
+                    if ($sc.TargetPath -and (Test-Path $sc.TargetPath)) { return (Split-Path $sc.TargetPath -Parent) }
+                } finally {
+                    if ($sc) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sc) | Out-Null } catch { } }
+                }
             } catch { }
         }
     } catch { } finally {
-        if ($ws) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws) | Out-Null } catch {} }
+        if ($ws) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws) | Out-Null } catch { } }
     }
     return $null
 }
@@ -314,7 +507,7 @@ function Find-DiscordAppPath {
         return $null
     }
     $af = @(Get-ChildItem $BasePath -Filter "app-*" -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { $folder = $_; try { if ($folder.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { $folder.Name } } catch { $folder.Name } } -Descending)
+        Sort-Object { try { if ($_.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { [Version]"0.0.0" } } catch { [Version]"0.0.0" } } -Descending)
     $diag = @{
         BasePath = $BasePath; AppFoldersFound = @(); ModulesFolderExists = $false; VoiceModuleExists = $false
         LatestAppFolder = $null; LatestAppVersion = $null; ModulesPath = $null; VoiceModulePath = $null; Error = $null
@@ -350,7 +543,7 @@ function Get-DiscordAppVersion {
     try {
         $exe = Get-ChildItem $AppPath -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
-    } catch {}
+    } catch { }
     return "Unknown"
 }
 
@@ -416,7 +609,7 @@ function Stop-DiscordProcesses {
             } catch { $p = @() }
         }
     }
-    if ($p) {
+    if ($p -and @($p).Count -gt 0) {
         $p | Stop-Process -Force -ErrorAction SilentlyContinue
         for ($i = 0; $i -lt 20; $i++) {
             $remaining = Get-Process -Name $ProcessNames -ErrorAction SilentlyContinue
@@ -603,11 +796,17 @@ function Show-ConfigurationGUI {
     foreach ($ic in $installedClients) { $Script:GuiInstalledIndices[$ic.Index] = $ic }
     $Script:GuiInstalledClients = $installedClients
 
+    $normalHeight = 570
+    $debugPanelHeight = 550
+    $debugExpandedHeight = $normalHeight + $debugPanelHeight
+    $formWidth = 520
+
     $form = New-Object Windows.Forms.Form -Property @{
-        Text = "Discord Voice Patcher v$Script:SCRIPT_VERSION"; ClientSize = "520,570"; StartPosition = "CenterScreen"
+        Text = "Discord Voice Patcher v$Script:SCRIPT_VERSION"; StartPosition = "CenterScreen"
         FormBorderStyle = "FixedDialog"; MaximizeBox = $false; MinimizeBox = $false
         BackColor = [Drawing.Color]::FromArgb(44,47,51); ForeColor = [Drawing.Color]::White
     }
+    $form.ClientSize = New-Object Drawing.Size($formWidth, $normalHeight)
 
     $newLabel = { param($x, $y, $w, $h, $text, $font, $color)
         $l = New-Object Windows.Forms.Label -Property @{ Location = "$x,$y"; Size = "$w,$h"; Text = $text }
@@ -618,7 +817,7 @@ function Show-ConfigurationGUI {
 
     & $newLabel 20 20 400 30 "Discord Voice Quality Patcher" (New-Object Drawing.Font("Segoe UI", 16, [Drawing.FontStyle]::Bold)) ([Drawing.Color]::FromArgb(88,101,242))
     & $newLabel 420 28 80 20 "v$Script:SCRIPT_VERSION" (New-Object Drawing.Font("Segoe UI", 9)) ([Drawing.Color]::FromArgb(150,152,157))
-    & $newLabel 20 55 480 20 "48kHz | 400kbps | Stereo | Multi-Client Support" (New-Object Drawing.Font("Segoe UI", 9)) ([Drawing.Color]::FromArgb(185,187,190))
+    & $newLabel 20 55 480 20 "48kHz | 384kbps | Stereo | Multi-Client Support" (New-Object Drawing.Font("Segoe UI", 9)) ([Drawing.Color]::FromArgb(185,187,190))
     & $newLabel 20 85 480 25 "Discord Client" (New-Object Drawing.Font("Segoe UI", 11, [Drawing.FontStyle]::Bold)) $null
 
     $clientCombo = New-Object Windows.Forms.ComboBox -Property @{
@@ -685,9 +884,223 @@ function Show-ConfigurationGUI {
     $statusLabel = & $newLabel 20 430 480 25 "" (New-Object Drawing.Font("Segoe UI", 9)) ([Drawing.Color]::FromArgb(237,66,69))
     if (-not $Script:GuiInstalledIndices.ContainsKey($clientCombo.SelectedIndex)) { $statusLabel.Text = "This client is not installed" }
 
+    $patchCheckboxes = @{}
+    $groupCheckboxes = @{}
+    $totalPatches = $Script:AllPatchKeys.Count
+    $Script:SuppressGroupToggle = $false
+    $Script:DebugPatchCheckboxes = $patchCheckboxes
+    $Script:DebugGroupCheckboxes = $groupCheckboxes
+    $Script:DebugTotalPatches = $totalPatches
+
+    $debugBadge = New-Object Windows.Forms.Label -Property @{
+        Location = "20,515"; Size = "90,24"; Text = "DEBUG MODE"
+        Font = New-Object Drawing.Font("Segoe UI", 8, [Drawing.FontStyle]::Bold)
+        ForeColor = [Drawing.Color]::FromArgb(44,47,51)
+        BackColor = [Drawing.Color]::FromArgb(254,231,92)
+        TextAlign = [Drawing.ContentAlignment]::MiddleCenter
+        Visible = $false
+    }
+    $form.Controls.Add($debugBadge)
+
+    $debugPanel = New-Object Windows.Forms.Panel -Property @{
+        Location = New-Object Drawing.Point(0, 545)
+        Size = New-Object Drawing.Size($formWidth, $debugPanelHeight)
+        AutoScroll = $true; Visible = $false
+        BackColor = [Drawing.Color]::FromArgb(47,49,54)
+    }
+    $form.Controls.Add($debugPanel)
+
+    $counterLabel = New-Object Windows.Forms.Label -Property @{
+        Location = "340,8"; Size = "160,20"; TextAlign = [Drawing.ContentAlignment]::MiddleRight
+        Font = New-Object Drawing.Font("Segoe UI", 9); ForeColor = [Drawing.Color]::FromArgb(185,187,190)
+    }
+    $debugPanel.Controls.Add($counterLabel)
+    $Script:DebugCounterLabel = $counterLabel
+
+    $updateCounter = {
+        $pb = $Script:DebugPatchCheckboxes
+        $lbl = $Script:DebugCounterLabel
+        $tot = $Script:DebugTotalPatches
+        if ($null -eq $pb -or $null -eq $lbl) { return }
+        $enabled = @($pb.Values | Where-Object { $_.Checked }).Count
+        $lbl.Text = "$enabled / $tot patches enabled"
+    }
+
+    $selectAllBtn = New-Object Windows.Forms.Button -Property @{
+        Location = "20,5"; Size = "85,25"; Text = "Select All"; FlatStyle = "Flat"
+        BackColor = [Drawing.Color]::FromArgb(54,57,63); ForeColor = [Drawing.Color]::White
+        Font = New-Object Drawing.Font("Segoe UI", 8); Cursor = [Windows.Forms.Cursors]::Hand
+    }
+    $selectAllBtn.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(64,68,75)
+    $selectAllBtn.Add_Click({
+        $Script:SuppressGroupToggle = $true
+        $pb = $Script:DebugPatchCheckboxes; $gb = $Script:DebugGroupCheckboxes
+        if ($pb) { foreach ($cb in $pb.Values) { $cb.Checked = $true } }
+        if ($gb) { foreach ($gcb in $gb.Values) { $gcb.Checked = $true } }
+        $Script:SuppressGroupToggle = $false
+        & $updateCounter
+    })
+    $debugPanel.Controls.Add($selectAllBtn)
+
+    $deselectAllBtn = New-Object Windows.Forms.Button -Property @{
+        Location = "112,5"; Size = "95,25"; Text = "Deselect All"; FlatStyle = "Flat"
+        BackColor = [Drawing.Color]::FromArgb(54,57,63); ForeColor = [Drawing.Color]::White
+        Font = New-Object Drawing.Font("Segoe UI", 8); Cursor = [Windows.Forms.Cursors]::Hand
+    }
+    $deselectAllBtn.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(64,68,75)
+    $deselectAllBtn.Add_Click({
+        $Script:SuppressGroupToggle = $true
+        $pb = $Script:DebugPatchCheckboxes; $gb = $Script:DebugGroupCheckboxes
+        if ($pb) { foreach ($cb in $pb.Values) { $cb.Checked = $false } }
+        if ($gb) { foreach ($gcb in $gb.Values) { $gcb.Checked = $false } }
+        $Script:SuppressGroupToggle = $false
+        & $updateCounter
+    })
+    $debugPanel.Controls.Add($deselectAllBtn)
+
+    $copyOffsetsBtn = New-Object Windows.Forms.Button -Property @{
+        Location = "212,5"; Size = "95,25"; Text = "Copy Offsets"; FlatStyle = "Flat"
+        BackColor = [Drawing.Color]::FromArgb(54,57,63); ForeColor = [Drawing.Color]::White
+        Font = New-Object Drawing.Font("Segoe UI", 8); Cursor = [Windows.Forms.Cursors]::Hand
+    }
+    $copyOffsetsBtn.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(64,68,75)
+    $copyOffsetsBtn.Add_Click({
+        try {
+            $block = Get-OffsetsCopyBlock
+            [System.Windows.Forms.Clipboard]::SetText($block)
+            $Script:StatusLabelCopyOffsets.Text = "Offsets copied"
+        } catch {
+            $Script:StatusLabelCopyOffsets.Text = "Copy failed"
+        }
+    })
+    $debugPanel.Controls.Add($copyOffsetsBtn)
+    $copyOffsetsStatus = New-Object Windows.Forms.Label -Property @{
+        Location = "312,8"; Size = "90,20"; Text = ""
+        Font = New-Object Drawing.Font("Segoe UI", 8); ForeColor = [Drawing.Color]::FromArgb(87,242,135)
+    }
+    $debugPanel.Controls.Add($copyOffsetsStatus)
+    $Script:StatusLabelCopyOffsets = $copyOffsetsStatus
+
+    $patchLocalBtn = New-Object Windows.Forms.Button -Property @{
+        Location = "20,35"; Size = "180,28"; Text = "Patch local (no download)"; FlatStyle = "Flat"
+        BackColor = [Drawing.Color]::FromArgb(87,242,135); ForeColor = [Drawing.Color]::FromArgb(30,30,30)
+        Font = New-Object Drawing.Font("Segoe UI", 9); Cursor = [Windows.Forms.Cursors]::Hand
+    }
+    $patchLocalBtn.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(64,68,75)
+    $patchLocalBtn.Add_Click({
+        $selectedIdx = $clientCombo.SelectedIndex
+        if (-not $Script:GuiInstalledIndices.ContainsKey($selectedIdx)) {
+            [System.Windows.Forms.MessageBox]::Show("Select an installed client first.", "Debug", "OK", "Warning")
+            return
+        }
+        $patchSel = @{}
+        $pb = $Script:DebugPatchCheckboxes
+        if ($pb) { foreach ($pk in $pb.Keys) { $patchSel[$pk] = $pb[$pk].Checked } }
+        $form.Tag = @{
+            Action = 'Patch'; Multiplier = $slider.Value
+            SkipBackup = -not $chk.Checked; AutoRelaunch = $autoRelaunchChk.Checked
+            ClientIndex = $selectedIdx; DebugMode = $true
+            SelectedPatches = $patchSel; PatchLocalOnly = $true
+        }
+        $form.DialogResult = "OK"; $form.Close()
+    })
+    $debugPanel.Controls.Add($patchLocalBtn)
+
+    $yPos = 70
+    $groupColors = @{
+        STEREO     = [Drawing.Color]::FromArgb(254,231,92)
+        BITRATE    = [Drawing.Color]::FromArgb(254,231,92)
+        SAMPLERATE = [Drawing.Color]::FromArgb(87,242,135)
+        FILTER     = [Drawing.Color]::FromArgb(254,231,92)
+        ENCODER    = [Drawing.Color]::FromArgb(254,231,92)
+    }
+
+    foreach ($groupName in $Script:PatchGroups.Keys) {
+        $patches = $Script:PatchGroups[$groupName]
+        $groupColor = $groupColors[$groupName]
+        if (-not $groupColor) { $groupColor = [Drawing.Color]::FromArgb(254,231,92) }
+
+        $grpChecked = ($patches.Keys | ForEach-Object { $Script:SelectedPatches[$_] } | Where-Object { $_ }).Count -eq $patches.Count
+        $grpChk = New-Object Windows.Forms.CheckBox -Property @{
+            Location = New-Object Drawing.Point(20, $yPos)
+            Size = New-Object Drawing.Size(460, 22)
+            Text = $groupName; Checked = $grpChecked
+            ForeColor = $groupColor
+            Font = New-Object Drawing.Font("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+        }
+        $grpChk.Add_CheckedChanged({
+            param($snd, $e)
+            if ($Script:SuppressGroupToggle) { return }
+            $Script:SuppressGroupToggle = $true
+            $gn = $snd.Text
+            $pb = $Script:DebugPatchCheckboxes
+            $grp = $Script:PatchGroups[$gn]
+            if ($pb -and $grp) {
+                foreach ($pk in $grp.Keys) {
+                    if ($pb.ContainsKey($pk)) { $pb[$pk].Checked = $snd.Checked }
+                }
+            }
+            $Script:SuppressGroupToggle = $false
+            & $updateCounter
+        })
+        $groupCheckboxes[$groupName] = $grpChk
+        $debugPanel.Controls.Add($grpChk)
+        $yPos += 24
+
+        foreach ($patchKey in $patches.Keys) {
+            $patchInfo = $patches[$patchKey]
+            $offset = $Script:Config.Offsets[$patchKey]
+            $offsetHex = if ($offset) { "0x{0:X}" -f $offset } else { "???" }
+
+            $pChk = New-Object Windows.Forms.CheckBox -Property @{
+                Location = New-Object Drawing.Point(45, $yPos)
+                Size = New-Object Drawing.Size(440, 20)
+                Text = $patchKey; Checked = ($Script:SelectedPatches[$patchKey] -eq $true)
+                ForeColor = [Drawing.Color]::White
+                Font = New-Object Drawing.Font("Segoe UI", 9)
+            }
+            $pChk.Add_CheckedChanged({
+                param($snd, $e)
+                if ($Script:SuppressGroupToggle) { return }
+                $Script:SuppressGroupToggle = $true
+                & $updateCounter
+                $pb = $Script:DebugPatchCheckboxes
+                $gb = $Script:DebugGroupCheckboxes
+                if ($pb -and $gb) {
+                    foreach ($gn in $Script:PatchGroups.Keys) {
+                        $allChecked = $true
+                        $grp = $Script:PatchGroups[$gn]
+                        if ($grp) {
+                            foreach ($pk in $grp.Keys) {
+                                if ($pb.ContainsKey($pk) -and -not $pb[$pk].Checked) { $allChecked = $false; break }
+                            }
+                        }
+                        if ($gb.ContainsKey($gn)) { $gb[$gn].Checked = $allChecked }
+                    }
+                }
+                $Script:SuppressGroupToggle = $false
+            })
+            $patchCheckboxes[$patchKey] = $pChk
+            $debugPanel.Controls.Add($pChk)
+
+            $infoLabel = New-Object Windows.Forms.Label -Property @{
+                Location = New-Object Drawing.Point(65, ($yPos + 20))
+                Size = New-Object Drawing.Size(420, 16)
+                Text = "$offsetHex  ->  $($patchInfo.Hex)"
+                Font = New-Object Drawing.Font("Consolas", 7.5)
+                ForeColor = [Drawing.Color]::FromArgb(120,124,128)
+            }
+            $debugPanel.Controls.Add($infoLabel)
+            $yPos += 40
+        }
+        $yPos += 8
+    }
+
+    & $updateCounter
+
     $btnStyle = { param($x, $text, $bgR, $bgG, $bgB, $bold, $action)
         $b = New-Object Windows.Forms.Button -Property @{
-            Location = "$x,470"; Size = "115,40"; Text = $text; FlatStyle = "Flat"
+            Location = "$x,470"; Size = "90,40"; Text = $text; FlatStyle = "Flat"
             BackColor = [Drawing.Color]::FromArgb($bgR, $bgG, $bgB); ForeColor = [Drawing.Color]::White
             Font = New-Object Drawing.Font("Segoe UI", 10, $(if ($bold) { [Drawing.FontStyle]::Bold } else { [Drawing.FontStyle]::Regular }))
             Cursor = [Windows.Forms.Cursors]::Hand
@@ -697,20 +1110,63 @@ function Show-ConfigurationGUI {
 
     & $btnStyle 20 "Restore" 79 84 92 $false { $form.Tag = @{ Action = 'Restore' }; $form.DialogResult = "Abort"; $form.Close() }
 
-    & $btnStyle 140 "Patch" 88 101 242 $true {
+    & $btnStyle 115 "Patch" 88 101 242 $true {
         $selectedIdx = $clientCombo.SelectedIndex
         if (-not $Script:GuiInstalledIndices.ContainsKey($selectedIdx)) { $statusLabel.Text = "Selected client is not installed!"; return }
-        $form.Tag = @{ Action = 'Patch'; Multiplier = $slider.Value; SkipBackup = -not $chk.Checked; AutoRelaunch = $autoRelaunchChk.Checked; ClientIndex = $selectedIdx }
+        $patchSel = @{}
+        $isDbg = $debugPanel.Visible
+        $pb = if ($isDbg) { $Script:DebugPatchCheckboxes } else { $patchCheckboxes }
+        if ($pb) {
+            foreach ($pk in $pb.Keys) {
+                $patchSel[$pk] = if ($isDbg) { $pb[$pk].Checked } else { $true }
+            }
+        }
+        $form.Tag = @{
+            Action = 'Patch'; Multiplier = $slider.Value
+            SkipBackup = -not $chk.Checked; AutoRelaunch = $autoRelaunchChk.Checked
+            ClientIndex = $selectedIdx; DebugMode = $isDbg; SelectedPatches = $patchSel
+        }
         $form.DialogResult = "OK"; $form.Close()
     }
 
-    & $btnStyle 260 "Patch All" 87 158 87 $true {
+    & $btnStyle 210 "Patch All" 87 158 87 $true {
         if ($Script:GuiInstalledClients.Count -eq 0) { $statusLabel.Text = "No Discord clients detected to patch!"; return }
-        $form.Tag = @{ Action = 'PatchAll'; Multiplier = $slider.Value; SkipBackup = -not $chk.Checked; AutoRelaunch = $autoRelaunchChk.Checked }
+        $patchSel = @{}
+        $isDbg = $debugPanel.Visible
+        $pb = if ($isDbg) { $Script:DebugPatchCheckboxes } else { $patchCheckboxes }
+        if ($pb) {
+            foreach ($pk in $pb.Keys) {
+                $patchSel[$pk] = if ($isDbg) { $pb[$pk].Checked } else { $true }
+            }
+        }
+        $form.Tag = @{
+            Action = 'PatchAll'; Multiplier = $slider.Value
+            SkipBackup = -not $chk.Checked; AutoRelaunch = $autoRelaunchChk.Checked
+            DebugMode = $isDbg; SelectedPatches = $patchSel
+        }
         $form.DialogResult = "OK"; $form.Close()
     }
 
-    $cancelBtn = & $btnStyle 385 "Cancel" 79 84 92 $false { $form.DialogResult = "Cancel"; $form.Close() }
+    $debugBtn = New-Object Windows.Forms.Button -Property @{
+        Location = "305,470"; Size = "90,40"; Text = "Debug"; FlatStyle = "Flat"
+        BackColor = [Drawing.Color]::FromArgb(79,84,92); ForeColor = [Drawing.Color]::White
+        Font = New-Object Drawing.Font("Segoe UI", 10)
+        Cursor = [Windows.Forms.Cursors]::Hand
+    }
+    $debugBtn.Add_Click({
+        if ($debugPanel.Visible) {
+            $debugPanel.Visible = $false
+            $debugBadge.Visible = $false
+            $form.ClientSize = New-Object Drawing.Size($formWidth, $normalHeight)
+        } else {
+            $debugPanel.Visible = $true
+            $debugBadge.Visible = $true
+            $form.ClientSize = New-Object Drawing.Size($formWidth, $debugExpandedHeight)
+        }
+    }.GetNewClosure())
+    $form.Controls.Add($debugBtn)
+
+    $cancelBtn = & $btnStyle 400 "Cancel" 79 84 92 $false { $form.DialogResult = "Cancel"; $form.Close() }
 
     $clientCombo.Add_SelectedIndexChanged({
         $selectedIdx = $clientCombo.SelectedIndex
@@ -730,14 +1186,7 @@ function Initialize-Environment {
     @($Script:Config.TempDir, $Script:Config.BackupDir) | ForEach-Object {
         if ($_ -and -not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
     }
-    $tempDir = $Script:Config.TempDir
-    if (Test-Path $tempDir) {
-        @("patcher.cpp", "amplifier.cpp", "DiscordVoicePatcher.exe", "build.bat", "build.log") | ForEach-Object {
-            $file = Join-Path $tempDir $_
-            if (Test-Path $file) { Remove-Item $file -Force -ErrorAction SilentlyContinue }
-        }
-        Get-ChildItem $tempDir -Filter "DiscordVoicePatcher_*.exe" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    }
+    Cleanup-TempFiles
     "=== Discord Voice Patcher Log ===`nStarted: $(Get-Date)`nGain: $($Script:Config.AudioGainMultiplier)x`n" | Out-File $Script:Config.LogFile -Force -ErrorAction SilentlyContinue
 }
 
@@ -917,7 +1366,7 @@ function Find-Compiler {
 function Cleanup-TempFiles {
     $tempDir = $Script:Config.TempDir
     if (-not $tempDir -or -not (Test-Path $tempDir)) { return }
-    @("patcher.cpp", "amplifier.cpp", "DiscordVoicePatcher.exe", "build.bat", "build.log", "patcher.obj", "amplifier.obj") | ForEach-Object {
+    @("patcher.cpp", "amplifier.cpp", "DiscordVoicePatcher.exe", "build.bat", "build.log", "patcher.obj", "amplifier.obj", "patcher_stdout.txt", "patcher_stderr.txt") | ForEach-Object {
         $file = Join-Path $tempDir $_
         if (Test-Path $file) { Remove-Item $file -Force -ErrorAction SilentlyContinue }
     }
@@ -1021,6 +1470,22 @@ function Get-PatcherSourceCode {
     param([string]$ProcessName = "Discord.exe", [string]$ModuleName = "discord_voice.node")
     $offsets = $Script:Config.Offsets
     $c = $Script:Config
+
+    # Require all 17 offsets before generating C++ (avoids null/zero in embedded code)
+    $missing = @($Script:RequiredOffsetNames | Where-Object { $null -eq $offsets[$_] -or ($offsets[$_] -is [int] -and $offsets[$_] -eq 0) })
+    if ($missing.Count -gt 0) {
+        throw "Missing or zero offset(s) required for patcher: $($missing -join ', '). Paste the full offset block from the offset finder (17 entries)."
+    }
+    $sp = $Script:SelectedPatches
+    $bitrateKbps = [Math]::Min(384, [int]$c.Bitrate)
+    if ([int]$c.Bitrate -ne $bitrateKbps) { Write-Log "Bitrate clamped to ${bitrateKbps}kbps for patcher" -Level Warning }
+
+    $patchDefines = ""
+    foreach ($k in $Script:AllPatchKeys) {
+        $val = if ($sp.ContainsKey($k) -and $sp[$k]) { 1 } else { 0 }
+        $patchDefines += "#define PATCH_$k $val`n"
+    }
+
     return @"
 #include <windows.h>
 #include <tlhelp32.h>
@@ -1030,9 +1495,10 @@ function Get-PatcherSourceCode {
 #include <cstdint>
 
 #define SAMPLE_RATE $($c.SampleRate)
-#define BITRATE $($c.Bitrate)
+#define BITRATE $bitrateKbps
 #define AUDIO_GAIN $($c.AudioGainMultiplier)
 
+$patchDefines
 extern "C" void dc_reject(const float*, float*, int*, int, int, int);
 extern "C" void hp_cutoff(const float*, int, float*, int*, int, int, int, int);
 
@@ -1052,7 +1518,6 @@ namespace Offsets {
     constexpr uint32_t DownmixFunc = $('0x{0:X}' -f $offsets.DownmixFunc);
     constexpr uint32_t AudioEncoderOpusConfigIsOk = $('0x{0:X}' -f $offsets.AudioEncoderOpusConfigIsOk);
     constexpr uint32_t ThrowError = $('0x{0:X}' -f $offsets.ThrowError);
-    constexpr uint32_t DuplicateEmulateBitrateModified = $('0x{0:X}' -f $offsets.DuplicateEmulateBitrateModified);
     constexpr uint32_t EncoderConfigInit1 = $('0x{0:X}' -f $offsets.EncoderConfigInit1);
     constexpr uint32_t EncoderConfigInit2 = $('0x{0:X}' -f $offsets.EncoderConfigInit2);
     constexpr uint32_t FILE_OFFSET_ADJUSTMENT = 0xC00;
@@ -1107,61 +1572,58 @@ private:
     bool ApplyPatches(void* fileData, LONGLONG fileSize) {
         printf("\nApplying patches:\n");
 
-        // Validate file size - the Feb 2026 node is ~13.6 MB
-        // Allow a reasonable range for minor rebuilds
-        constexpr LONGLONG MIN_EXPECTED_SIZE = 12 * 1024 * 1024;  // 12 MB
-        constexpr LONGLONG MAX_EXPECTED_SIZE = 18 * 1024 * 1024;  // 18 MB
+        constexpr LONGLONG MIN_EXPECTED_SIZE = 12 * 1024 * 1024;
+        constexpr LONGLONG MAX_EXPECTED_SIZE = 18 * 1024 * 1024;
         if (fileSize < MIN_EXPECTED_SIZE || fileSize > MAX_EXPECTED_SIZE) {
-            printf("ERROR: File size %.2f MB is outside expected range (12-18 MB)\n",
-                   fileSize / (1024.0 * 1024.0));
-            printf("This may not be the correct discord_voice.node build for these offsets.\n");
+            printf("ERROR: File size %.2f MB outside expected range (12-18 MB). Wrong build?\n", fileSize / (1024.0 * 1024.0));
             return false;
         }
 
-        // Validate original bytes at 3 patch sites across different code sections
-        // to verify this is the expected build before writing anything
         auto CheckBytes = [&](uint32_t offset, const unsigned char* expected, size_t len) -> bool {
             uint32_t fileOffset = offset - Offsets::FILE_OFFSET_ADJUSTMENT;
             if ((LONGLONG)(fileOffset + len) > fileSize) return false;
             return memcmp((char*)fileData + fileOffset, expected, len) == 0;
         };
 
-        // Probe 3 sections: 0x53 (Emulate48Khz), 0x3A (ConfigIsOk), 0x8B (DownmixFunc)
-        const unsigned char orig_48khz[]    = {0x0F, 0x42, 0xC1};            // cmovb eax,ecx
-        const unsigned char orig_configok[] = {0x8B, 0x11, 0x31, 0xC0};      // mov edx,[rcx]; xor eax,eax
-        const unsigned char orig_downmix[]  = {0x41, 0x57, 0x41, 0x56};      // push r15; push r14
+        const unsigned char orig_48khz[]    = {0x0F, 0x42, 0xC1};
+        const unsigned char orig_configok[] = {0x8B, 0x11, 0x31, 0xC0};
+        const unsigned char orig_downmix[]  = {0x41, 0x57, 0x41, 0x56};
+        const unsigned char orig_enc_32k[]  = {0x00, 0x7D, 0x00, 0x00};
 
-        const unsigned char patched_48khz[]    = {0x90, 0x90, 0x90};         // nop nop nop
-        const unsigned char patched_configok[] = {0x48, 0xC7, 0xC0, 0x01};   // mov rax, 1
-        const unsigned char patched_downmix[]  = {0xC3};                     // ret
+        const unsigned char patched_48khz[]    = {0x90, 0x90, 0x90};
+        const unsigned char patched_configok[] = {0x48, 0xC7, 0xC0, 0x01};
+        const unsigned char patched_downmix[]  = {0xC3};
+        const unsigned char patched_enc384[]   = {0x00, 0xDC, 0x05, 0x00};
 
-        bool o1 = CheckBytes(Offsets::Emulate48Khz, orig_48khz, 3);
-        bool o2 = CheckBytes(Offsets::AudioEncoderOpusConfigIsOk, orig_configok, 4);
-        bool o3 = CheckBytes(Offsets::DownmixFunc, orig_downmix, 4);
+        bool o1 = CheckBytes(Offsets::Emulate48Khz, orig_48khz, 3)
+               || CheckBytes(Offsets::Emulate48Khz, patched_48khz, 3);
+        bool o2 = CheckBytes(Offsets::AudioEncoderOpusConfigIsOk, orig_configok, 4)
+               || CheckBytes(Offsets::AudioEncoderOpusConfigIsOk, patched_configok, 4);
+        bool o3 = CheckBytes(Offsets::DownmixFunc, orig_downmix, 4)
+               || CheckBytes(Offsets::DownmixFunc, patched_downmix, 1);
+        bool o_enc1 = CheckBytes(Offsets::EncoderConfigInit1, orig_enc_32k, 4)
+               || CheckBytes(Offsets::EncoderConfigInit1, patched_enc384, 4);
+        bool o_enc2 = CheckBytes(Offsets::EncoderConfigInit2, orig_enc_32k, 4)
+               || CheckBytes(Offsets::EncoderConfigInit2, patched_enc384, 4);
 
-        bool p1 = CheckBytes(Offsets::Emulate48Khz, patched_48khz, 3);
-        bool p2 = CheckBytes(Offsets::AudioEncoderOpusConfigIsOk, patched_configok, 4);
-        bool p3 = CheckBytes(Offsets::DownmixFunc, patched_downmix, 1);
-
-        if (p1 && p2 && p3) {
-            printf("WARNING: This file appears to already be patched!\n");
-            printf("Re-patching anyway to ensure all patches are applied...\n\n");
-        } else if (!o1 || !o2 || !o3) {
-            printf("ERROR: Binary validation failed - unexpected bytes at patch sites.\n");
-            printf("  Emulate48Khz (0x53 section):     %s\n", o1 ? "OK" : "MISMATCH");
-            printf("  ConfigIsOk   (0x3A section):     %s\n", o2 ? "OK" : "MISMATCH");
-            printf("  DownmixFunc  (0x8B section):     %s\n", o3 ? "OK" : "MISMATCH");
-            printf("\nThis discord_voice.node does not match the expected Feb 2026 build.\n");
-            printf("The offsets in this patcher are for a specific build and cannot be\n");
-            printf("applied safely to a different version.\n");
+        if (!o1 || !o2 || !o3) {
+            printf("ERROR: Binary validation failed - wrong build.\n");
+            printf("  Emulate48Khz: %s  ConfigIsOk: %s  DownmixFunc: %s\n", o1 ? "OK" : "MISMATCH", o2 ? "OK" : "MISMATCH", o3 ? "OK" : "MISMATCH");
             return false;
+        }
+        if (CheckBytes(Offsets::Emulate48Khz, patched_48khz, 3)
+            && CheckBytes(Offsets::AudioEncoderOpusConfigIsOk, patched_configok, 4)
+            && CheckBytes(Offsets::DownmixFunc, patched_downmix, 1)) {
+            printf("NOTE: Key sites look already patched; re-applying all enabled patches.\n\n");
+        }
+        if (!o_enc1 || !o_enc2) {
+            printf("WARNING: Encoder config sites do not match stock or 384k patched pattern; EncoderConfigInit1/2 will be skipped if selected.\n\n");
         }
 
         auto PatchBytes = [&](uint32_t offset, const char* bytes, size_t len) -> bool {
             uint32_t fileOffset = offset - Offsets::FILE_OFFSET_ADJUSTMENT;
             if ((LONGLONG)(fileOffset + len) > fileSize) {
-                printf("ERROR: Patch at 0x%X (len %zu) exceeds file size!\n", offset, len);
-                printf("The discord_voice.node may not match the expected build.\n");
+                printf("ERROR: Patch at 0x%X (len %zu) exceeds file size.\n", offset, len);
                 return false;
             }
             memcpy((char*)fileData + fileOffset, bytes, len);
@@ -1175,83 +1637,175 @@ private:
             return true;
         };
 
-        printf("  [1/5] Enabling stereo audio...\n");
+        int patchCount = 0;
+        int skipCount = 0;
+
+#if PATCH_EmulateStereoSuccess1
+        printf("  [STEREO] EmulateStereoSuccess1 (channels=2)...\n");
         if (!PatchBytes(Offsets::EmulateStereoSuccess1, "\x02", 1)) return false;
+        patchCount++;
+#else
+        printf("  [STEREO] EmulateStereoSuccess1 - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_EmulateStereoSuccess2
+        printf("  [STEREO] EmulateStereoSuccess2 (jne->jmp)...\n");
         if (!PatchBytes(Offsets::EmulateStereoSuccess2, "\xEB", 1)) return false;
+        patchCount++;
+#else
+        printf("  [STEREO] EmulateStereoSuccess2 - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_CreateAudioFrameStereo
+        printf("  [STEREO] CreateAudioFrameStereo...\n");
         if (!PatchBytes(Offsets::CreateAudioFrameStereo, "\x49\x89\xC5\x90", 4)) return false;
+        patchCount++;
+#else
+        printf("  [STEREO] CreateAudioFrameStereo - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_AudioEncoderOpusConfigSetChannels
+        printf("  [STEREO] AudioEncoderConfigSetChannels (ch=2)...\n");
         if (!PatchBytes(Offsets::AudioEncoderOpusConfigSetChannels, "\x02", 1)) return false;
+        patchCount++;
+#else
+        printf("  [STEREO] AudioEncoderConfigSetChannels - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_MonoDownmixer
+        printf("  [STEREO] MonoDownmixer (NOP sled + JMP)...\n");
         if (!PatchBytes(Offsets::MonoDownmixer, "\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\xE9", 13)) return false;
-        printf("  [2/5] Setting bitrate to 400kbps...\n");
-        if (!PatchBytes(Offsets::EmulateBitrateModified, "\x80\x1A\x06", 3)) return false;
-        if (!PatchBytes(Offsets::SetsBitrateBitrateValue, "\x80\x1A\x06\x00\x00", 5)) return false;
+        patchCount++;
+#else
+        printf("  [STEREO] MonoDownmixer - SKIPPED\n"); skipCount++;
+#endif
+
+#if PATCH_EmulateBitrateModified
+        printf("  [BITRATE] EmulateBitrateModified (384kbps)...\n");
+        if (!PatchBytes(Offsets::EmulateBitrateModified, "\x00\xDC\x05", 3)) return false;
+        patchCount++;
+#else
+        printf("  [BITRATE] EmulateBitrateModified - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_SetsBitrateBitrateValue
+        printf("  [BITRATE] SetsBitrateBitrateValue (384kbps)...\n");
+        if (!PatchBytes(Offsets::SetsBitrateBitrateValue, "\x00\xDC\x05\x00\x00", 5)) return false;
+        patchCount++;
+#else
+        printf("  [BITRATE] SetsBitrateBitrateValue - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_SetsBitrateBitwiseOr
+        printf("  [BITRATE] SetsBitrateBitwiseOr (NOP)...\n");
         if (!PatchBytes(Offsets::SetsBitrateBitwiseOr, "\x90\x90\x90", 3)) return false;
-        // Patch duplicate bitrate calculation path (parallel function the original patcher missed)
-        if (!PatchBytes(Offsets::DuplicateEmulateBitrateModified, "\x80\x1A\x06", 3)) return false;
-        printf("  [3/5] Enabling 48kHz sample rate...\n");
+        patchCount++;
+#else
+        printf("  [BITRATE] SetsBitrateBitwiseOr - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_Emulate48Khz
+        printf("  [SAMPLERATE] Emulate48Khz (NOP cmovb)...\n");
         if (!PatchBytes(Offsets::Emulate48Khz, "\x90\x90\x90", 3)) return false;
-        if (AUDIO_GAIN == 1) {
-            printf("  [4/5] Injecting audio processing (no amplification)...\n");
-        } else {
-            printf("  [4/5] Injecting audio processing (%dx gain)...\n", AUDIO_GAIN);
-        }
-        // Build HighPassFilter stub: mov rax, <HighpassCutoffFilter VA>; ret
-        // The stub replaces the filter function with an immediate return.
-        // The address in rax is cosmetic (caller ignores return value) but
-        // we compute it correctly for clarity during reverse engineering.
+        patchCount++;
+#else
+        printf("  [SAMPLERATE] Emulate48Khz - SKIPPED\n"); skipCount++;
+#endif
+
+#if PATCH_HighPassFilter
+        printf("  [FILTER] HighPassFilter (RET stub)...\n");
         {
             constexpr uint64_t IMAGE_BASE = 0x180000000ULL;
             uint64_t hpcVA = IMAGE_BASE + Offsets::HighpassCutoffFilter;
             unsigned char hpPatch[11];
-            hpPatch[0] = 0x48;  // REX.W
-            hpPatch[1] = 0xB8;  // mov rax, imm64
+            hpPatch[0] = 0x48;
+            hpPatch[1] = 0xB8;
             memcpy(hpPatch + 2, &hpcVA, 8);
-            hpPatch[10] = 0xC3;  // ret
+            hpPatch[10] = 0xC3;
             if (!PatchBytes(Offsets::HighPassFilter, (const char*)hpPatch, 11)) return false;
         }
+        patchCount++;
+#else
+        printf("  [FILTER] HighPassFilter - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_HighpassCutoffFilter
+        printf("  [FILTER] HighpassCutoffFilter (inject hp_cutoff)...\n");
         if (!PatchBytes(Offsets::HighpassCutoffFilter, (const char*)hp_cutoff, 0x100)) return false;
+        patchCount++;
+#else
+        printf("  [FILTER] HighpassCutoffFilter - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_DcReject
+        printf("  [FILTER] DcReject (inject dc_reject)...\n");
         if (!PatchBytes(Offsets::DcReject, (const char*)dc_reject, 0x1B6)) return false;
+        patchCount++;
+#else
+        printf("  [FILTER] DcReject - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_DownmixFunc
+        printf("  [FILTER] DownmixFunc (RET)...\n");
         if (!PatchBytes(Offsets::DownmixFunc, "\xC3", 1)) return false;
+        patchCount++;
+#else
+        printf("  [FILTER] DownmixFunc - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_AudioEncoderOpusConfigIsOk
+        printf("  [FILTER] AudioEncoderConfigIsOk (RET true)...\n");
         if (!PatchBytes(Offsets::AudioEncoderOpusConfigIsOk, "\x48\xC7\xC0\x01\x00\x00\x00\xC3", 8)) return false;
+        patchCount++;
+#else
+        printf("  [FILTER] AudioEncoderConfigIsOk - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_ThrowError
+        printf("  [FILTER] ThrowError (RET)...\n");
         if (!PatchBytes(Offsets::ThrowError, "\xC3", 1)) return false;
-        printf("  [5/5] Patching encoder config init (400kbps at creation)...\n");
-        // Patch both Opus encoder config constructors to initialize with 400kbps
-        // instead of default 32kbps - prevents bitrate reset between encoder creation
-        // and first SetBitrate call. 400000 = 0x61A80.
-        if (!PatchBytes(Offsets::EncoderConfigInit1, "\x80\x1A\x06\x00", 4)) return false;
-        if (!PatchBytes(Offsets::EncoderConfigInit2, "\x80\x1A\x06\x00", 4)) return false;
+        patchCount++;
+#else
+        printf("  [FILTER] ThrowError - SKIPPED\n"); skipCount++;
+#endif
 
-        // Post-patch verification: enforce 400000 bps bytes at every bitrate patch site.
-        const unsigned char bps400_3[] = {0x80, 0x1A, 0x06};
-        const unsigned char bps400_4[] = {0x80, 0x1A, 0x06, 0x00};
-        const unsigned char bps400_5[] = {0x80, 0x1A, 0x06, 0x00, 0x00};
-        if (!CheckBytes(Offsets::EmulateBitrateModified, bps400_3, 3) ||
-            !CheckBytes(Offsets::DuplicateEmulateBitrateModified, bps400_3, 3) ||
-            !CheckBytes(Offsets::SetsBitrateBitrateValue, bps400_5, 5) ||
-            !CheckBytes(Offsets::EncoderConfigInit1, bps400_4, 4) ||
-            !CheckBytes(Offsets::EncoderConfigInit2, bps400_4, 4)) {
-            printf("ERROR: Post-patch bitrate verification failed.\n");
-            printf("Expected 400000 bps byte pattern (80 1A 06) was not present at all sites.\n");
-            return false;
-        }
+#if PATCH_EncoderConfigInit1
+        if (o_enc1) {
+            printf("  [ENCODER] EncoderConfigInit1 (32000 -> 384000)...\n");
+            if (!PatchBytes(Offsets::EncoderConfigInit1, "\x00\xDC\x05\x00", 4)) return false;
+            patchCount++;
+        } else { printf("  [ENCODER] EncoderConfigInit1 - SKIPPED (validation failed)\n"); skipCount++; }
+#else
+        printf("  [ENCODER] EncoderConfigInit1 - SKIPPED\n"); skipCount++;
+#endif
+#if PATCH_EncoderConfigInit2
+        if (o_enc2) {
+            printf("  [ENCODER] EncoderConfigInit2 (32000 -> 384000)...\n");
+            if (!PatchBytes(Offsets::EncoderConfigInit2, "\x00\xDC\x05\x00", 4)) return false;
+            patchCount++;
+        } else { printf("  [ENCODER] EncoderConfigInit2 - SKIPPED (validation failed)\n"); skipCount++; }
+#else
+        printf("  [ENCODER] EncoderConfigInit2 - SKIPPED\n"); skipCount++;
+#endif
 
-        uint32_t setBitrateValue = 0;
-        uint32_t encoderInit1Value = 0;
-        uint32_t encoderInit2Value = 0;
-        if (!ReadU32LE(Offsets::SetsBitrateBitrateValue, setBitrateValue) ||
-            !ReadU32LE(Offsets::EncoderConfigInit1, encoderInit1Value) ||
-            !ReadU32LE(Offsets::EncoderConfigInit2, encoderInit2Value)) {
-            printf("ERROR: Failed to read back bitrate values for verification.\n");
-            return false;
+#if PATCH_EmulateBitrateModified && PATCH_SetsBitrateBitrateValue
+        {
+            const unsigned char bps384_3[] = {0x00, 0xDC, 0x05};
+            const unsigned char bps384_5[] = {0x00, 0xDC, 0x05, 0x00, 0x00};
+            if (!CheckBytes(Offsets::EmulateBitrateModified, bps384_3, 3) ||
+                !CheckBytes(Offsets::SetsBitrateBitrateValue, bps384_5, 5)) {
+                printf("ERROR: Post-patch bitrate verification failed (384000 bps pattern missing).\n");
+                return false;
+            }
+            uint32_t setBitrateValue = 0;
+            if (!ReadU32LE(Offsets::SetsBitrateBitrateValue, setBitrateValue)) {
+                printf("ERROR: Failed to read back bitrate value for verification.\n");
+                return false;
+            }
+            if (setBitrateValue != 384000) {
+                printf("ERROR: Bitrate verification mismatch after patching (SetBitrate=%u, expected 384000)\n", setBitrateValue);
+                return false;
+            }
+            printf("  Verified bitrate: %u bps\n", setBitrateValue);
         }
-        if (setBitrateValue != 400000 || encoderInit1Value != 400000 || encoderInit2Value != 400000) {
-            printf("ERROR: Bitrate verification mismatch after patching.\n");
-            printf("  SetBitrate=%u, EncoderInit1=%u, EncoderInit2=%u (expected all 400000)\n",
-                   setBitrateValue, encoderInit1Value, encoderInit2Value);
-            return false;
+#else
+        printf("  Bitrate verification skipped (bitrate patches not all enabled).\n");
+#endif
+
+        printf("\n  Applied: %d patches, Skipped: %d patches\n", patchCount, skipCount);
+        if (patchCount > 0) {
+            printf("  All selected patches applied successfully!\n");
+        } else {
+            printf("  WARNING: No patches were applied!\n");
         }
-        printf("  Verified bitrate values: %u / %u / %u bps\n",
-               setBitrateValue, encoderInit1Value, encoderInit2Value);
-        printf("  All patches applied successfully!\n");
         return true;
     }
 
@@ -1348,7 +1902,7 @@ int main(int argc, char* argv[]) {
             for (const char** pn = processNames; *pn != NULL; pn++) {
                 if (strcmp(entry.szExeFile, *pn) == 0) {
                     printf("Found Discord (PID: %lu)\n", entry.th32ProcessID);
-                    HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
+                    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.th32ProcessID);
                     if (!process) { printf("ERROR: Cannot open process (run as Administrator)\n"); continue; }
                     HMODULE modules[1024];
                     DWORD bytesNeeded;
@@ -1400,42 +1954,16 @@ function New-SourceFiles {
         $ampContent = Get-Content $amp -Raw
         $cfgGain = [int]$Script:Config.AudioGainMultiplier
         if ($cfgGain -ge 3) {
-            if ($ampContent -match '#define GAIN_MULTIPLIER') {
-                Write-Log "ERROR: 3x+ path must not contain GAIN_MULTIPLIER. Wrong amplifier code was generated." -Level Error
-            }
+            if ($ampContent -match '#define GAIN_MULTIPLIER') { Write-Log "Amplifier codegen error: 3x+ path must not contain GAIN_MULTIPLIER" -Level Error }
             if ($ampContent -match '#define Multiplier (-?\d+)') {
-                $actualMult = $Matches[1]
                 $expectedMult = $cfgGain - 2
-                Write-Log "VERIFY: 3x+ ONLY - #define Multiplier = $actualMult (expected: $expectedMult for ${cfgGain}x)" -Level Info
-                if ([int]$actualMult -ne $expectedMult) {
-                    Write-Log "WARNING: Multiplier mismatch! File has $actualMult but expected $expectedMult" -Level Warning
-                }
-                if ($ampContent -match 'channels \+ Multiplier') {
-                    Write-Log "VERIFY: amplifier.cpp uses ONLY (channels + Multiplier) for 3x+" -Level Info
-                } else {
-                    Write-Log "WARNING: Could not confirm 3x+ formula in amplifier.cpp" -Level Warning
-                }
-            } else {
-                Write-Log "WARNING: Could not find #define Multiplier in generated code!" -Level Warning
-            }
+                if ([int]$Matches[1] -ne $expectedMult) { Write-Log "Multiplier mismatch: got $($Matches[1]), expected $expectedMult" -Level Warning }
+            } else { Write-Log "Missing #define Multiplier in generated amplifier code" -Level Warning }
         } else {
-            if ($ampContent -match '#define Multiplier ') {
-                Write-Log "ERROR: 1x/2x path must not contain Multiplier. Wrong amplifier code was generated." -Level Error
-            }
+            if ($ampContent -match '#define Multiplier ') { Write-Log "Amplifier codegen error: 1x/2x path must not contain Multiplier" -Level Error }
             if ($ampContent -match '#define GAIN_MULTIPLIER (\d+)') {
-                $actualGain = $Matches[1]
-                Write-Log "VERIFY: 1x/2x ONLY - #define GAIN_MULTIPLIER = $actualGain (expected: $cfgGain)" -Level Info
-                if ([int]$actualGain -ne $cfgGain) {
-                    Write-Log "WARNING: Gain mismatch! File has $actualGain but expected $cfgGain" -Level Warning
-                }
-                if ($ampContent -match 'float scale = 1\.0f' -and $ampContent -match 'GAIN_MULTIPLIER \* scale') {
-                    Write-Log "VERIFY: amplifier.cpp uses ONLY 1x/2x path (scale + GAIN_MULTIPLIER)" -Level Info
-                } else {
-                    Write-Log "WARNING: Could not confirm 1x/2x path in amplifier.cpp" -Level Warning
-                }
-            } else {
-                Write-Log "WARNING: Could not find #define GAIN_MULTIPLIER in generated code!" -Level Warning
-            }
+                if ([int]$Matches[1] -ne $cfgGain) { Write-Log "Gain mismatch: got $($Matches[1]), expected $cfgGain" -Level Warning }
+            } else { Write-Log "Missing #define GAIN_MULTIPLIER in generated amplifier code" -Level Warning }
         }
         if (-not (Test-Path $patcher)) { throw "patcher.cpp was not created at: $patcher" }
         if (-not (Test-Path $amp)) { throw "amplifier.cpp was not created at: $amp" }
@@ -1510,12 +2038,25 @@ function Invoke-Compilation {
         switch ($Compiler.Type) {
             'MSVC' {
                 $src1 = $SourceFiles[0]; $src2 = $SourceFiles[1]; $vcvars = $Compiler.Path
-                $batContent = "@echo off`ncall `"$vcvars`"`nif errorlevel 1 (`n    echo ERROR: Failed to initialize Visual Studio environment`n    exit /b 1`n)`ncl.exe /EHsc /O2 /std:c++17 ^`n    `"$src1`" ^`n    `"$src2`" ^`n    /Fe`"$exe`" ^`n    /link Psapi.lib"
+                $batLines = @(
+                    '@echo off'
+                    ('call "{0}"' -f $vcvars)
+                    'if errorlevel 1 ('
+                    '    echo ERROR: Failed to initialize Visual Studio environment'
+                    '    exit /b 1'
+                    ')'
+                    'cl.exe /EHsc /O2 /std:c++17 ^'
+                    ('    "{0}" ^' -f $src1)
+                    ('    "{0}" ^' -f $src2)
+                    ('    /Fe"{0}" ^' -f $exe)
+                    '    /link Psapi.lib'
+                )
+                $batContent = $batLines -join "`r`n"
                 $batPath = "$($Script:Config.TempDir)\build.bat"
                 Set-Content -Path $batPath -Value $batContent -Encoding ASCII -NoNewline
                 $pinfo = New-Object System.Diagnostics.ProcessStartInfo
                 $pinfo.FileName = "cmd.exe"
-                $pinfo.Arguments = "/c `"`"$batPath`" > `"$log`" 2>&1`""
+                $pinfo.Arguments = ('/c ""{0}"" > ""{1}"" 2>&1' -f $batPath, $log)
                 $pinfo.UseShellExecute = $false
                 $pinfo.CreateNoWindow = $true
                 $pinfo.WorkingDirectory = $Script:Config.TempDir
@@ -1539,6 +2080,9 @@ function Invoke-Compilation {
         }
         if (Test-Path $exe) {
             $exeInfo = Get-Item $exe
+            if ($exeInfo.Length -lt 4096) {
+                throw "Build produced invalid exe ($($exeInfo.Length) bytes)"
+            }
             Write-Log "Compilation successful! Exe size: $([Math]::Round($exeInfo.Length / 1KB, 1)) KB" -Level Success
             return $exe
         }
@@ -1557,27 +2101,15 @@ function Invoke-Compilation {
 
 function Get-UniqueClientsByAppPath {
     param([array]$Clients)
-
-    $uniquePaths = @{}
-    $uniqueClients = [System.Collections.ArrayList]::new()
-
-    foreach ($client in $Clients) {
-        if (-not $client.AppPath) {
-            continue
-        }
-        if ($uniquePaths.ContainsKey($client.AppPath)) {
-            continue
-        }
-
-        $uniquePaths[$client.AppPath] = $true
-        [void]$uniqueClients.Add($client)
+    $seen = @{}; $out = [System.Collections.ArrayList]::new()
+    foreach ($c in $Clients) {
+        if (-not $c.AppPath -or $seen.ContainsKey($c.AppPath)) { continue }
+        $seen[$c.AppPath] = $true; [void]$out.Add($c)
     }
-
-    return @($uniqueClients)
+    return @($out)
 }
 
 function Get-PreparedVoiceBackupPath {
-    Write-Log "Downloading voice backup files from GitHub..." -Level Info
     $voiceBackupPath = Join-Path $Script:Config.TempDir "VoiceBackup"
     EnsureDir $voiceBackupPath
     if (-not (Download-VoiceBackupFiles $voiceBackupPath)) {
@@ -1585,29 +2117,72 @@ function Get-PreparedVoiceBackupPath {
         return $null
     }
 
+    $voiceNode = Join-Path $voiceBackupPath "discord_voice.node"
+    if (-not (Test-Path $voiceNode)) {
+        Write-Log "discord_voice.node was not found in voice backup folder: $voiceBackupPath" -Level Error
+        return $null
+    }
+
+    try {
+        $nodeInfo = Get-Item $voiceNode -ErrorAction Stop
+        $nodeSize = [int64]$nodeInfo.Length
+        $nodeMd5 = Get-FileMd5Hex -Path $voiceNode
+
+        Write-Log ("Voice node downloaded: {0} MB | MD5={1}" -f ([Math]::Round($nodeSize / 1MB, 2)), $nodeMd5) -Level Info
+
+        $meta = $Script:Config.OffsetsMeta
+        if ($meta) {
+            if ($meta.Build) { Write-Log "Offsets build: $($meta.Build)" -Level Info }
+            if ($meta.MD5) {
+                $expected = ($meta.MD5.ToString()).ToLowerInvariant()
+                if ($nodeMd5 -ne $expected) {
+                    Write-Log "ERROR: Offsets do not match the downloaded discord_voice.node build." -Level Error
+                    Write-Log "  Downloaded node MD5: $nodeMd5" -Level Error
+                    Write-Log "  OffsetsMeta MD5:     $expected" -Level Error
+                    Write-Log "Paste the new offsets (and MD5) from your offset finder into the '# region Offsets (PASTE HERE)' block." -Level Error
+                    return $null
+                }
+            } else {
+                Write-Log "OffsetsMeta.MD5 is not set - skipping voice node hash check." -Level Warning
+            }
+            if ($meta.Size) {
+                try {
+                    $expectedSize = [int64]$meta.Size
+                    if ($expectedSize -ne $nodeSize) {
+                        Write-Log "Warning: OffsetsMeta.Size ($expectedSize) does not match downloaded node size ($nodeSize)" -Level Warning
+                    }
+                } catch { }
+            }
+        }
+    } catch {
+        Write-Log "Could not verify downloaded voice node against offsets: $($_.Exception.Message)" -Level Warning
+    }
+
     return $voiceBackupPath
 }
 
 function Invoke-PatchClients {
-    param([array]$Clients, [hashtable]$Compiler, [string]$VoiceBackupPath)
+    param([array]$Clients, [hashtable]$Compiler, [string]$VoiceBackupPath, [switch]$PatchLocalOnly)
 
     if (-not $Clients -or $Clients.Count -eq 0) {
         return @{ Success = 0; Failed = @(); Total = 0 }
     }
 
     $allClientNames = @($Clients | ForEach-Object { $_.Name.Trim() })
-    if (-not $VoiceBackupPath -or -not (Test-Path $VoiceBackupPath)) {
-        Write-Log "Voice backup path not found: $VoiceBackupPath" -Level Error
-        return @{ Success = 0; Failed = $allClientNames; Total = $Clients.Count }
+    if (-not $PatchLocalOnly) {
+        if (-not $VoiceBackupPath -or -not (Test-Path $VoiceBackupPath)) {
+            Write-Log "Voice backup path not found: $VoiceBackupPath" -Level Error
+            return @{ Success = 0; Failed = $allClientNames; Total = $Clients.Count }
+        }
+        $backupFiles = @(Get-ChildItem $VoiceBackupPath -File -ErrorAction SilentlyContinue)
+        if ($backupFiles.Count -eq 0) {
+            Write-Log "No files found in voice backup path" -Level Error
+            return @{ Success = 0; Failed = $allClientNames; Total = $Clients.Count }
+        }
+        Write-Log "Voice backup contains $($backupFiles.Count) files" -Level Info
+    } else {
+        Write-Log "Patch local only: using existing voice module files (no download)." -Level Info
     }
-
-    $backupFiles = @(Get-ChildItem $VoiceBackupPath -File -ErrorAction SilentlyContinue)
-    if ($backupFiles.Count -eq 0) {
-        Write-Log "No files found in voice backup path" -Level Error
-        return @{ Success = 0; Failed = $allClientNames; Total = $Clients.Count }
-    }
-
-    Write-Log "Voice backup contains $($backupFiles.Count) files" -Level Info
     $successCount = 0
     $failedClients = [System.Collections.ArrayList]::new()
 
@@ -1639,17 +2214,18 @@ function Invoke-PatchClients {
                 }
             }
 
-            Write-Log "Removing old voice module files..." -Level Info
-            if (Test-Path $voiceFolderPath) {
-                Remove-Item "$voiceFolderPath\*" -Recurse -Force -ErrorAction SilentlyContinue
-            } else {
-                EnsureDir $voiceFolderPath
+            if (-not $PatchLocalOnly) {
+                Write-Log "Removing old voice module files..." -Level Info
+                if (Test-Path $voiceFolderPath) {
+                    Remove-Item "$voiceFolderPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+                } else {
+                    EnsureDir $voiceFolderPath
+                }
+                Write-Log "Installing compatible voice module..." -Level Info
+                Copy-Item "$VoiceBackupPath\*" $voiceFolderPath -Recurse -Force
             }
-
-            Write-Log "Installing compatible voice module..." -Level Info
-            Copy-Item "$VoiceBackupPath\*" $voiceFolderPath -Recurse -Force
             if (-not (Test-Path $voiceNodePath)) {
-                throw "discord_voice.node not found after copying backup files"
+                throw "discord_voice.node not found. Install voice module first or run without 'Patch local'."
             }
 
             Write-Log "Voice node: $voiceNodePath" -Level Info
@@ -1697,21 +2273,14 @@ function Start-Patching {
         $updateResult = Check-ForUpdate
         if ($updateResult.UpdateAvailable) {
             Write-Host ""
-            Write-Host "A new version is available: v$($updateResult.RemoteVersion)" -ForegroundColor Yellow
-            Write-Host "Current version: v$($updateResult.LocalVersion)" -ForegroundColor Cyan
+            Write-Host "Syncing script from GitHub (v$($updateResult.LocalVersion) -> v$($updateResult.RemoteVersion))..." -ForegroundColor Yellow
             Write-Host ""
-            $response = Read-Host "Would you like to update now? (Y/n)"
-            if ($response -eq '' -or $response -match '^[Yy]') {
-                Write-Log "Applying update..." -Level Info
-                if (Apply-ScriptUpdate -UpdatedScriptPath $updateResult.TempFile -CurrentScriptPath $PSCommandPath -RestartAfter) {
-                    Write-Log "Update prepared! Script will restart..." -Level Success
-                    Start-Sleep -Seconds 2; exit 0
-                } else {
-                    Write-Log "Failed to apply update. Continuing with current version..." -Level Warning
-                    if (Test-Path $updateResult.TempFile) { Remove-Item $updateResult.TempFile -Force -ErrorAction SilentlyContinue }
-                }
+            Write-Log "Applying update from GitHub..." -Level Info
+            if (Apply-ScriptUpdate -UpdatedScriptPath $updateResult.TempFile -CurrentScriptPath $PSCommandPath -RestartAfter) {
+                Write-Log "Update applied; restarting with the same launch options..." -Level Success
+                Start-Sleep -Seconds 2; exit 0
             } else {
-                Write-Log "Update skipped. Continuing with current version..." -Level Info
+                Write-Log "Failed to apply update. Continuing with current version..." -Level Warning
                 if (Test-Path $updateResult.TempFile) { Remove-Item $updateResult.TempFile -Force -ErrorAction SilentlyContinue }
             }
             Write-Host ""
@@ -1732,7 +2301,7 @@ function Start-Patching {
         $installedClients = @(Get-InstalledClients)
         if ($installedClients.Count -eq 0) {
             Write-Log "No Discord clients found! Make sure Discord is installed." -Level Error
-            Read-Host "Press Enter"
+            Wait-EnterOrTimeout
             return $false
         }
 
@@ -1740,7 +2309,7 @@ function Start-Patching {
             $installedClients = @($installedClients | Where-Object { $_.Name -like "*$FixClient*" })
             if ($installedClients.Count -eq 0) {
                 Write-Log "No clients matching '$FixClient' found" -Level Error
-                Read-Host "Press Enter"
+                Wait-EnterOrTimeout
                 return $false
             }
         }
@@ -1754,13 +2323,13 @@ function Start-Patching {
 
         $compiler = Find-Compiler
         if (-not $compiler) {
-            Read-Host "Press Enter"
+            Wait-EnterOrTimeout
             return $false
         }
 
         $voiceBackupPath = Get-PreparedVoiceBackupPath
         if (-not $voiceBackupPath) {
-            Read-Host "Press Enter"
+            Wait-EnterOrTimeout
             return $false
         }
 
@@ -1796,7 +2365,7 @@ function Start-Patching {
             }
         }
         Save-UserConfig
-        Read-Host "Press Enter to exit"
+        Wait-EnterOrTimeout
         return ($result.Success -eq $result.Total)
     }
 
@@ -1822,15 +2391,23 @@ function Start-Patching {
     if ($guiResult.Action -eq 'PatchAll') {
         $Script:DoFixAll = $true
         $Script:PendingGainForPatchAll = $guiResult.Multiplier
+        if ($guiResult.DebugMode -and $guiResult.SelectedPatches) {
+            $Script:SelectedPatches = $guiResult.SelectedPatches
+            Write-Log "Debug Mode: $(($guiResult.SelectedPatches.Values | Where-Object { $_ }).Count) / $($Script:AllPatchKeys.Count) patches selected" -Level Warning
+        }
         return Start-Patching
     }
 
     Show-Settings
     Initialize-Environment
+    if ($guiResult.DebugMode -and $guiResult.SelectedPatches) {
+        $Script:SelectedPatches = $guiResult.SelectedPatches
+        Write-Log "Debug Mode: $(($guiResult.SelectedPatches.Values | Where-Object { $_ }).Count) / $($Script:AllPatchKeys.Count) patches selected" -Level Warning
+    }
     $selectedClientInfo = $Script:DiscordClients[$guiResult.ClientIndex]
     if (-not $selectedClientInfo) {
         Write-Log "Invalid client selection" -Level Error
-        Read-Host "Press Enter"
+        Wait-EnterOrTimeout
         return $false
     }
 
@@ -1839,20 +2416,24 @@ function Start-Patching {
     $targetClient = $installedClients | Where-Object { $_.Index -eq $guiResult.ClientIndex } | Select-Object -First 1
     if (-not $targetClient) {
         Write-Log "Selected client is not installed!" -Level Error
-        Read-Host "Press Enter"
+        Wait-EnterOrTimeout
         return $false
     }
 
     $compiler = Find-Compiler
     if (-not $compiler) {
-        Read-Host "Press Enter"
+        Wait-EnterOrTimeout
         return $false
     }
 
-    $voiceBackupPath = Get-PreparedVoiceBackupPath
-    if (-not $voiceBackupPath) {
-        Read-Host "Press Enter"
-        return $false
+    $patchLocalOnly = $guiResult.PatchLocalOnly -eq $true
+    $voiceBackupPath = $null
+    if (-not $patchLocalOnly) {
+        $voiceBackupPath = Get-PreparedVoiceBackupPath
+        if (-not $voiceBackupPath) {
+            Wait-EnterOrTimeout
+            return $false
+        }
     }
 
     Write-Log "Closing Discord processes..." -Level Info
@@ -1866,14 +2447,22 @@ function Start-Patching {
     if (-not $installPath -and $selectedClientInfo.Path -and (Test-Path $selectedClientInfo.Path)) {
         $installPath = (Get-Item $selectedClientInfo.Path).FullName
     }
-    $stopped = Stop-DiscordProcesses -ProcessNames $selectedClientInfo.Processes -InstallPath $installPath
+    if ($installPath) {
+        $stopped = Stop-DiscordProcesses -ProcessNames $selectedClientInfo.Processes -InstallPath $installPath
+    } else {
+        $stopped = Stop-DiscordProcesses -ProcessNames $selectedClientInfo.Processes
+    }
     if (-not $stopped) {
         Write-Log "Warning: Some processes may still be running" -Level Warning
         Start-Sleep -Seconds 2
     }
 
     Start-Sleep -Seconds 1
-    $result = Invoke-PatchClients -Clients @($targetClient) -Compiler $compiler -VoiceBackupPath $voiceBackupPath
+    if ($patchLocalOnly) {
+        $result = Invoke-PatchClients -Clients @($targetClient) -Compiler $compiler -VoiceBackupPath $null -PatchLocalOnly
+    } else {
+        $result = Invoke-PatchClients -Clients @($targetClient) -Compiler $compiler -VoiceBackupPath $voiceBackupPath
+    }
     Write-Host ""
     if ($result.Success -gt 0) {
         Write-Log "=== PATCHING COMPLETE ===" -Level Success
@@ -1890,7 +2479,7 @@ function Start-Patching {
                     Write-Log "Launching via Update.exe..." -Level Info
                     Start-Process $updateExe -ArgumentList "--processStart", $selectedClientInfo.Exe -WindowStyle Hidden -RedirectStandardOutput $discordOut -RedirectStandardError $discordErr
                 } else {
-                    $appFolder = Get-ChildItem $discordPath -Directory -Filter "app-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+                    $appFolder = Get-ChildItem $discordPath -Directory -Filter "app-*" -ErrorAction SilentlyContinue | Sort-Object { try { if ($_.Name -match "app-([\d\.]+)") { [Version]$matches[1] } else { [Version]"0.0.0" } } catch { [Version]"0.0.0" } } -Descending | Select-Object -First 1
                     if ($appFolder) {
                         $exePath = Join-Path $appFolder.FullName $selectedClientInfo.Exe
                         if (Test-Path $exePath) {
@@ -1905,7 +2494,7 @@ function Start-Patching {
         Write-Log "=== PATCHING FAILED ===" -Level Error
     }
     Save-UserConfig
-    Read-Host "Press Enter to exit"
+    Wait-EnterOrTimeout
     return ($result.Success -gt 0)
 }
 
@@ -1920,7 +2509,7 @@ try {
 } catch {
     Write-Host "`nFATAL ERROR: $_" -ForegroundColor Red
     Write-Host $_.ScriptStackTrace -ForegroundColor Red
-    Read-Host "Press Enter to exit"; exit 1
+    Wait-EnterOrTimeout; exit 1
 }
 
 # endregion Run

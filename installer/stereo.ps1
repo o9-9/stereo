@@ -1,4 +1,4 @@
-# ═══════════════════════════════════════════════════════════════════════════════
+﻿# ═══════════════════════════════════════════════════════════════════════════════
 # DISCORD VOICE FIXER - Stereo Audio Module Installer
 # ═══════════════════════════════════════════════════════════════════════════════
 # Usage: .\DiscordVoiceFixer.ps1 [-Silent] [-CheckOnly] [-FixClient <n>] [-Help]
@@ -51,9 +51,9 @@ $DiscordClients = [ordered]@{
     8 = @{Name="BetterVencord            [Mod]";      Path="$env:LOCALAPPDATA\BetterVencord";      RoamingPath="$env:APPDATA\discord";            FallbackPath="$env:LOCALAPPDATA\Discord"; Processes=@("BetterVencord","Discord","Update"); Exe="Discord.exe"; Shortcut="BetterVencord"}
 }
 
-$UPDATE_URL = "https://raw.githubusercontent.com/ProdHallow/installer/main/DiscordVoiceFixer.ps1"
-$VOICE_BACKUP_API = "https://api.github.com/repos/ProdHallow/voice-backup/contents/Discord%20Voice%20Backup"
-$SETTINGS_JSON_URL = "https://raw.githubusercontent.com/ProdHallow/voice-backup/main/settings.json"
+$UPDATE_URL = "https://raw.githubusercontent.com/o9-9/stereo/main/installer/DiscordVoiceFixer.ps1"
+$VOICE_BACKUP_API = "https://api.github.com/repos/o9-9/stereo/contents/voice-backup/Discord%20Voice%20Backup"
+$SETTINGS_JSON_URL = "https://raw.githubusercontent.com/o9-9/stereo/main/voice-backup/settings.json"
 $DISCORD_SETUP_URL = "https://discord.com/api/downloads/distributions/app/installers/latest?channel=stable&platform=win&arch=x64"
 
 $APP_DATA_ROOT = "$env:APPDATA\StereoInstaller"

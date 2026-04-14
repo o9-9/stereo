@@ -11,16 +11,17 @@ Automated discovery of patch sites inside Discord’s native voice module (`disc
 
 ---
 
-# ⚠️ ATTENTION!!! I WILL BE MERGING EVERY DISCORD AUDIO RELATED REPO TO [Discord Audio Collective](https://github.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux)
+# This project is now maintained in [o9-9/stereo](https://github.com/o9-9/stereo).
+
 ---
 
 ## 👥 Credits
 
-**Research, signatures, and patch methodology:** ProdHallow, Cypher, Shaun, Oracle, Crue, Geeko  
+**Research, signatures, and patch methodology:** ProdHallow, Cypher, Shaun, Oracle, Crue, Geeko
 
 **Python tooling and architecture:** substantial assistance from Claude (Anthropic) in earlier iterations; this tree continues to evolve with the maintainers.
 
-**GUI:** Oracle, Shaun, Hallow, Ascend, Sentry, Sikimzo, Cypher, Crue, Geeko  
+**GUI:** Oracle, Shaun, Hallow, Ascend, Sentry, Sikimzo, Cypher, Crue, Geeko
 
 **Original offset discovery:** Cypher, Oracle, Shaun (among others above).
 
@@ -97,18 +98,18 @@ The **Stereo Hub** can download/sync the finder into its cache and launch **Offs
 
 ## ⚙️ How it works
 
-| Stage | Role |
-|--------|------|
-| **Format detection** | PE / ELF / Mach-O (fat); `.text`, `image_base`, adjustments. |
-| **Phase 0 (ELF / Mach-O)** | Symbol resolution or narrowed scan hints where symbols exist. |
-| **Phase 1** | Signature scan (primary → relaxed → clang/platform alternates); validation at match sites. |
-| **Phase 1b / fallbacks** | Patched-binary fallbacks and stub-derived sites when patterns match. |
-| **Phase 2** | Derivation: `DERIVATIONS` (anchor + delta), with sliding recovery when exact bytes differ. |
-| **Phase 2b** | Heuristics (e.g. `EmulateBitrateModified` near anchors or full-text scan with distance caps). |
-| **Validation** | Expected bytes, bounds, **duplicate RVA** detection (two names must not share the same config offset). |
-| **Cross-validation** | Consistency checks on derived distances and encoder config literals (`_cross_validate`). |
-| **ARM64 (fat Mach-O)** | Separate `discover_offsets_arm64` pipeline; literal-32000 fallback for `EmulateBitrateModified` when layout differs from x86_64. |
-| **PE extras** | Optional bitrate audit in verbose mode (`run_bitrate_audit_pe`). |
+| Stage                      | Role                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Format detection**       | PE / ELF / Mach-O (fat); `.text`, `image_base`, adjustments.                                                                     |
+| **Phase 0 (ELF / Mach-O)** | Symbol resolution or narrowed scan hints where symbols exist.                                                                    |
+| **Phase 1**                | Signature scan (primary → relaxed → clang/platform alternates); validation at match sites.                                       |
+| **Phase 1b / fallbacks**   | Patched-binary fallbacks and stub-derived sites when patterns match.                                                             |
+| **Phase 2**                | Derivation: `DERIVATIONS` (anchor + delta), with sliding recovery when exact bytes differ.                                       |
+| **Phase 2b**               | Heuristics (e.g. `EmulateBitrateModified` near anchors or full-text scan with distance caps).                                    |
+| **Validation**             | Expected bytes, bounds, **duplicate RVA** detection (two names must not share the same config offset).                           |
+| **Cross-validation**       | Consistency checks on derived distances and encoder config literals (`_cross_validate`).                                         |
+| **ARM64 (fat Mach-O)**     | Separate `discover_offsets_arm64` pipeline; literal-32000 fallback for `EmulateBitrateModified` when layout differs from x86_64. |
+| **PE extras**              | Optional bitrate audit in verbose mode (`run_bitrate_audit_pe`).                                                                 |
 
 Implementation details live in `discord_voice_node_offset_finder_v5.py` (`SIGNATURES`, `DERIVATIONS`, `ALL_OFFSET_NAMES`, `ARM64_SYMBOL_MAP`, etc.).
 
@@ -124,13 +125,13 @@ Seventeen names, same set as **`$Script:RequiredOffsetNames`** (Windows patcher)
 
 ## 📤 Outputs
 
-| Artifact | Description |
-|----------|-------------|
-| **Console** | Marked lines: `[SYM]`, `[SCAN]`, `[OK]`, `[FAIL]`, `[HEUR]`, `[XVAL]`, etc. |
+| Artifact          | Description                                                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Console**       | Marked lines: `[SYM]`, `[SCAN]`, `[OK]`, `[FAIL]`, `[HEUR]`, `[XVAL]`, etc.                                                                            |
 | **Windows block** | Between `--- BEGIN COPY (Windows) ---` and `--- END COPY ---`: replace `# region Offsets` … `# endregion Offsets` in `Discord_voice_node_patcher.ps1`. |
-| **Linux block** | For `discord_voice_patcher_linux.sh`: fingerprints + `OFFSET_*` + `FILE_OFFSET_ADJUSTMENT`. |
-| **macOS block** | `OFFSETS` / `ARM64_OFFSETS` associative arrays and `FILE_OFFSET_ADJUSTMENT` as emitted. |
-| **JSON** | `<input>.offsets.json`: version, MD5, format, hex offsets, `resolution_tiers`, arm64 fields when present. |
+| **Linux block**   | For `discord_voice_patcher_linux.sh`: fingerprints + `OFFSET_*` + `FILE_OFFSET_ADJUSTMENT`.                                                            |
+| **macOS block**   | `OFFSETS` / `ARM64_OFFSETS` associative arrays and `FILE_OFFSET_ADJUSTMENT` as emitted.                                                                |
+| **JSON**          | `<input>.offsets.json`: version, MD5, format, hex offsets, `resolution_tiers`, arm64 fields when present.                                              |
 
 CLI-generated `offsets.txt` / `.offsets.json` / graph files are deleted on exit unless you copy them first; the GUI can persist **JSON** (and related options) according to its checkboxes.
 
@@ -148,11 +149,11 @@ If no path is passed, the CLI searches under:
 
 ## 🚦 Exit codes
 
-| Code | Meaning (typical) |
-|------|-------------------|
+| Code  | Meaning (typical)                                                                                  |
+| ----- | -------------------------------------------------------------------------------------------------- |
 | **0** | PE: 17/17 patcher offsets. Non-PE: 17/17 x86_64 and arm64 complete when an arm64 slice is present. |
-| **1** | Partial (e.g. most offsets found). |
-| **2** | Too few offsets for safe patching. |
+| **1** | Partial (e.g. most offsets found).                                                                 |
+| **2** | Too few offsets for safe patching.                                                                 |
 
 Exact thresholds are implemented in the script’s `main()` summary logic.
 
@@ -178,4 +179,4 @@ Exact thresholds are implemented in the script’s `main()` summary logic.
 
 ---
 
-*Last README polish aligned with finder v5.1 and GUI v1.1.1 in this folder.*
+_Last README polish aligned with finder v5.1 and GUI v1.1.1 in this folder._

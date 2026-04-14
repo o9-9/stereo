@@ -19,8 +19,8 @@ if [[ -n "${SUDO_USER:-}" ]] && [[ "$(id -u 2>/dev/null)" -eq 0 ]]; then
 fi
 [[ -z "${DETECT_HOME:-}" ]] && DETECT_HOME="${HOME:-}"
 
-VOICE_BACKUP_API="https://api.github.com/repos/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/contents/Linux%20Patcher%20and%20Installer/discord_voice"
-UPDATE_URL="https://raw.githubusercontent.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/main/Updates/Linux/Updates/Stereo-Installer-Linux.sh"
+VOICE_BACKUP_API="https://api.github.com/repos/o9-9/stereo/contents/Discord-Stereo-Windows-MacOS-Linux%2FUpdates%2FNodes%2FUnpatched%20Nodes%20%28For%20Patcher%29%2FLinux"
+UPDATE_URL="https://raw.githubusercontent.com/o9-9/stereo/main/Discord-Stereo-Windows-MacOS-Linux/Updates/Linux/Updates/Stereo-Installer-Linux.sh"
 
 APP_DATA_ROOT="$DETECT_HOME/.cache/DiscordVoiceFixer"
 BACKUP_ROOT="$APP_DATA_ROOT/backups"

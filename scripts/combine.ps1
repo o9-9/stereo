@@ -3,12 +3,10 @@
 $targetRepo = "https://github.com/o9-9/stereo"
 
 $repos = @(
-    "https://github.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux",
-    "https://github.com/ProdHallow/Discord-Node-Patcher",
-    "https://github.com/ProdHallow/Discord-Voice-Node-Offset-Finder",
-    "https://github.com/ProdHallow/Discord-Stereo-Installer",
-    "https://github.com/ProdHallow/voice-backup",
-    "https://github.com/ProdHallow/installer"
+    "https://github.com/o9-9/Discord-Stereo-Windows-MacOS-Linux",
+    "https://github.com/o9-9/Discord-Node-Patcher",
+    "https://github.com/o9-9/Discord-Voice-Node-Offset-Finder",
+    "https://github.com/o9-9/Discord-Stereo-Installer"
 )
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("combine_repos_" + [guid]::NewGuid().ToString("N"))

@@ -15,7 +15,7 @@ $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction SilentlyContinue
 
 # Canonical source (same tree as Stereo Hub / Linux bundle)
-$Script:UPDATE_URL_BASE = "https://raw.githubusercontent.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/main/Updates/Windows/Discord_voice_node_patcher.ps1"
+$Script:UPDATE_URL_BASE = "https://raw.githubusercontent.com/o9-9/stereo/main/Discord-Node-Patcher/Discord_voice_node_patcher.ps1"
 $Script:SCRIPT_VERSION = "6"
 
 # region Offsets (PASTE HERE)
@@ -158,8 +158,8 @@ $Script:Config = @{
     TempDir = "$env:TEMP\DiscordVoicePatcher"; BackupDir = "$env:TEMP\DiscordVoicePatcher\Backups"
     LogFile = "$env:TEMP\DiscordVoicePatcher\patcher.log"; ConfigFile = "$env:TEMP\DiscordVoicePatcher\config.json"
     MaxBackupCount = 10
-    # Browser: https://github.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/tree/main/Updates/Nodes/Unpatched%20Nodes%20(For%20Patcher)/Windows
-    VoiceBackupAPI = "https://api.github.com/repos/ProdHallow/Discord-Stereo-Windows-MacOS-Linux/contents/Updates%2FNodes%2FUnpatched%20Nodes%20%28For%20Patcher%29%2FWindows"
+    # Browser: https://github.com/o9-9/stereo/tree/main/Discord-Stereo-Windows-MacOS-Linux/Updates/Nodes/Unpatched%20Nodes%20(For%20Patcher)/Windows
+    VoiceBackupAPI = "https://api.github.com/repos/o9-9/stereo/contents/Discord-Stereo-Windows-MacOS-Linux%2FUpdates%2FNodes%2FUnpatched%20Nodes%20%28For%20Patcher%29%2FWindows"
     OffsetsMeta = $Script:OffsetsMeta
     Offsets     = $Script:Offsets
 }

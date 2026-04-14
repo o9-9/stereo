@@ -19,12 +19,12 @@
 
 ## Command-line modes
 
-| Switch | Behavior |
-|--------|----------|
-| **`-Help`** | Prints usage and exits. |
-| **`-CheckOnly`** | No changes. Lists installed clients and whether a fix or Discord update is needed; uses exit codes for automation. |
-| **`-Silent`** | No window. Uses saved settings from `%APPDATA%\StereoInstaller\settings.json` to decide things like auto-fix-after-update, EQ APO, shortcut, and auto-start. Same core flow as the GUI fix: repair badly broken official installs if needed, download voice files, stop Discord, backup, replace modules. |
-| **`-FixClient <text>`** | With **`-Silent`**, only clients whose name matches the text (wildcard-style `*text*`). |
+| Switch                  | Behavior                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`-Help`**             | Prints usage and exits.                                                                                                                                                                                                                                                                                   |
+| **`-CheckOnly`**        | No changes. Lists installed clients and whether a fix or Discord update is needed; uses exit codes for automation.                                                                                                                                                                                        |
+| **`-Silent`**           | No window. Uses saved settings from `%APPDATA%\StereoInstaller\settings.json` to decide things like auto-fix-after-update, EQ APO, shortcut, and auto-start. Same core flow as the GUI fix: repair badly broken official installs if needed, download voice files, stop Discord, backup, replace modules. |
+| **`-FixClient <text>`** | With **`-Silent`**, only clients whose name matches the text (wildcard-style `*text*`).                                                                                                                                                                                                                   |
 
 ---
 
@@ -43,19 +43,19 @@ Only the paths that match what you actually do are used (e.g. **`-Help`** / **`-
 
 ### Script update / saved copy of the script
 
-- `https://raw.githubusercontent.com/o9-9/installer/main/DiscordVoiceFixer.ps1`  
+- `https://raw.githubusercontent.com/o9-9/stereo/main/installer/DiscordVoiceFixer.ps1`  
   Used when **checking for a script update** (GUI **Start Fix** with that option enabled) or when **saving the script to AppData** and the running script path is not available (fallback download).
 
 ### Stereo voice module files (fix / Fix All / Silent fix)
 
 1. **Listing** (JSON, not saved as the final modules):  
-   `https://api.github.com/repos/o9-9/voice-backup/contents/Discord%20Voice%20Backup`
+   `https://api.github.com/repos/o9-9/stereo/contents/voice-backup/Discord%20Voice%20Backup`
 
-2. **Each file in that folder** is then downloaded from whatever URL GitHub returns in the API as `download_url` for that file (typically under `raw.githubusercontent.com/o9-9/voice-backup/...`, one URL per file in the repo folder).
+2. **Each file in that folder** is then downloaded from whatever URL GitHub returns in the API as `download_url` for that file (typically under `raw.githubusercontent.com/o9-9/stereo/main/voice-backup/...`, one URL per file in the repo folder).
 
 ### EQ APO fix (`settings.json` replacement)
 
-- `https://raw.githubusercontent.com/o9-9/voice-backup/main/settings.json`
+- `https://raw.githubusercontent.com/o9-9/stereo/main/voice-backup/settings.json`
 
 ### Discord Windows installer (corrupted official install repair / reinstall)
 

@@ -1,0 +1,1 @@
+# FAQ extracted from READMEs

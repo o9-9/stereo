@@ -1,0 +1,19 @@
+[submodule "src/Discord-Stereo-Windows-MacOS-Linux"]
+	path = src/Discord-Stereo-Windows-MacOS-Linux
+	url = https://github.com/ProdHallow/Discord-Stereo-Windows-MacOS-Linux
+
+[submodule "src/Discord-Node-Patcher"]
+	path = src/Discord-Node-Patcher
+	url = https://github.com/ProdHallow/Discord-Node-Patcher
+
+[submodule "src/Discord-Voice-Node-Offset-Finder"]
+	path = src/Discord-Voice-Node-Offset-Finder
+	url = https://github.com/ProdHallow/Discord-Voice-Node-Offset-Finder
+
+[submodule "src/ProdHallow/installer"]
+	path = src/ProdHallow/installer
+	url = https://github.com/ProdHallow/installer
+
+[submodule "src/Discord-Stereo-Installer"]
+	path = src/Discord-Stereo-Installer
+	url = https://github.com/ProdHallow/Discord-Stereo-Installer

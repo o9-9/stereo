@@ -29,12 +29,12 @@ cd stereo
 ### 3. Add the 6 repos as remotes
 
 ```bash
-git remote add discord-stereo-patcher https://github.com/o9-9/discord-stereo-patcher.git
-git remote add discord-stereo-finder https://github.com/o9-9/discord-stereo-finder.git
-git remote add discord-stereo-batch https://github.com/o9-9/discord-stereo-batch.git
-git remote add discord-stereo-backup https://github.com/o9-9/discord-stereo-backup.git
-git remote add discord-stereo-powershell https://github.com/o9-9/discord-stereo-powershell.git
-git remote add discord-stereo-windows https://github.com/o9-9/discord-stereo-windows.git
+git remote add discord-stereo-patcher https://github.com/o9-9/stereo-patcher.git
+git remote add discord-stereo-finder https://github.com/o9-9/stereo-finder.git
+git remote add discord-stereo-batch https://github.com/o9-9/stereo-batch.git
+git remote add discord-stereo-backup https://github.com/o9-9/stereo-backup.git
+git remote add discord-stereo-powershell https://github.com/o9-9/stereo-powershell.git
+git remote add discord-stereo-windows https://github.com/o9-9/stereo-windows.git
 ```
 
 ### 4. Pull the 6 repos with `git subtree`
@@ -71,12 +71,12 @@ git push origin main
 git clone https://github.com/o9-9/stereo.git
 cd stereo
 
-git remote add discord-stereo-patcher https://github.com/o9-9/discord-stereo-patcher.git
-git remote add discord-stereo-finder https://github.com/o9-9/discord-stereo-finder.git
-git remote add discord-stereo-batch https://github.com/o9-9/discord-stereo-batch.git
-git remote add discord-stereo-backup https://github.com/o9-9/discord-stereo-backup.git
-git remote add discord-stereo-powershell https://github.com/o9-9/discord-stereo-powershell.git
-git remote add discord-stereo-windows https://github.com/o9-9/discord-stereo-windows.git
+git remote add discord-stereo-patcher https://github.com/o9-9/stereo-patcher.git
+git remote add discord-stereo-finder https://github.com/o9-9/stereo-finder.git
+git remote add discord-stereo-batch https://github.com/o9-9/stereo-batch.git
+git remote add discord-stereo-backup https://github.com/o9-9/stereo-backup.git
+git remote add discord-stereo-powershell https://github.com/o9-9/stereo-powershell.git
+git remote add discord-stereo-windows https://github.com/o9-9/stereo-windows.git
 
 git subtree add --prefix=repos/discord-stereo-patcher discord-stereo-patcher main --squash
 git subtree add --prefix=repos/discord-stereo-finder discord-stereo-finder main --squash
@@ -102,12 +102,12 @@ WORKDIR="$(pwd)/.tmp-repos"
 PATCH_DIR="$(pwd)/.patches"
 
 REPOS=(
-  "https://github.com/o9-9/discord-stereo-patcher.git"
-  "https://github.com/o9-9/discord-stereo-finder.git"
-  "https://github.com/o9-9/discord-stereo-batch.git"
-  "https://github.com/o9-9/discord-stereo-backup.git"
-  "https://github.com/o9-9/discord-stereo-powershell.git"
-  "https://github.com/o9-9/discord-stereo-windows.git"
+  "https://github.com/o9-9/stereo-patcher.git"
+  "https://github.com/o9-9/stereo-finder.git"
+  "https://github.com/o9-9/stereo-batch.git"
+  "https://github.com/o9-9/stereo-backup.git"
+  "https://github.com/o9-9/stereo-powershell.git"
+  "https://github.com/o9-9/stereo-windows.git"
 )
 
 rm -rf "$WORKDIR" "$PATCH_DIR" "$MONOREPO"
@@ -154,16 +154,16 @@ git am "$PATCH_DIR"/*.patch
 
 ### Explanation
 
-* Clones all repos
-* Extracts all commits with timestamps
-* Sorts them globally
-* Converts each commit into a patch
-* Rewrites paths → `repos/<repo>/...`
-* Applies patches in order → **single linear history**
+- Clones all repos
+- Extracts all commits with timestamps
+- Sorts them globally
+- Converts each commit into a patch
+- Rewrites paths → `repos/<repo>/...`
+- Applies patches in order → **single linear history**
 
-- [Script to combine multiple git repos | jsloop](https://jsloop.net/2026/01/04/script-to-combine-multiple-git-repos)
-- [combine two git repos into a monorepo](https://gist.github.com/acg/a4cfd3cc139704a8801827c60b8fecee)
-- [combine repositories in Git](https://coreui.io/answers/how-to-combine-repositories-in-git)
+* [Script to combine multiple git repos | jsloop](https://jsloop.net/2026/01/04/script-to-combine-multiple-git-repos)
+* [combine two git repos into a monorepo](https://gist.github.com/acg/a4cfd3cc139704a8801827c60b8fecee)
+* [combine repositories in Git](https://coreui.io/answers/how-to-combine-repositories-in-git)
 
 ---
 
@@ -180,12 +180,12 @@ $PatchDir = "$PWD\.patches"
 $MonoRepo = "$PWD\stereo"
 
 $Repos = @(
-  "https://github.com/o9-9/discord-stereo-patcher.git",
-  "https://github.com/o9-9/discord-stereo-finder.git",
-  "https://github.com/o9-9/discord-stereo-batch.git",
-  "https://github.com/o9-9/discord-stereo-backup.git",
-  "https://github.com/o9-9/discord-stereo-powershell.git",
-  "https://github.com/o9-9/discord-stereo-windows.git"
+  "https://github.com/o9-9/stereo-patcher.git",
+  "https://github.com/o9-9/stereo-finder.git",
+  "https://github.com/o9-9/stereo-batch.git",
+  "https://github.com/o9-9/stereo-backup.git",
+  "https://github.com/o9-9/stereo-powershell.git",
+  "https://github.com/o9-9/stereo-windows.git"
 )
 
 Remove-Item $WorkDir,$PatchDir,$MonoRepo -Recurse -Force -ErrorAction SilentlyContinue
@@ -245,11 +245,11 @@ Pop-Location
 
 ## 2. Explanation
 
-* Uses `git format-patch` to convert each commit into a patch ([Git][1])
-* Sorts all commits globally by timestamp
-* Rewrites paths → `repos/<repo>/...`
-* Applies patches via `git am` to rebuild history ([DevTut][2])
+- Uses `git format-patch` to convert each commit into a patch ([Git][1])
+- Sorts all commits globally by timestamp
+- Rewrites paths → `repos/<repo>/...`
+- Applies patches via `git am` to rebuild history ([DevTut][2])
 
-- [git-format-patch Documentation](https://git-scm.com/docs/git-format-patch)
-- [Git Patch](https://devtut.github.io/git/git-patch.html)
-- [git apply patch command not working in powershell](https://stackoverflow.com/questions/39099288/why-is-git-apply-patch-command-not-working-in-powershell?noredirect=1)
+* [git-format-patch Documentation](https://git-scm.com/docs/git-format-patch)
+* [Git Patch](https://devtut.github.io/git/git-patch.html)
+* [git apply patch command not working in powershell](https://stackoverflow.com/questions/39099288/why-is-git-apply-patch-command-not-working-in-powershell?noredirect=1)

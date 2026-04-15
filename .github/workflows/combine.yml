@@ -33,10 +33,10 @@ jobs:
       - name: Clone and nest source repos
         run: |
           repos=(
-            "https://github.com/o9-9/Discord-Stereo-Windows-MacOS-Linux"
+            "https://github.com/o9-9/system"
             "https://github.com/o9-9/Discord-Node-Patcher"
             "https://github.com/o9-9/Discord-Voice-Node-Offset-Finder"
-            "https://github.com/o9-9/Discord-Stereo-Installer"
+            "https://github.com/o9-9/stereo-Installer"
           )
 
           for repo in "${repos[@]}"; do

@@ -1,0 +1,27 @@
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# Logs / local state (if ever committed by mistake)
+*.log
+
+# Files to exclude from the repository
+docs/
+files/
+.github/workflows/ci.yml
+.github/workflows/combine-repos.yml

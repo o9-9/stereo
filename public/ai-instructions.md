@@ -4,12 +4,12 @@
 
 - Main Repo Name: **`stereo`**
 - Subfolders:
-  - **[fixer](https://github.com/o9-9/discord-stereo-powershell)**
-  - **[batch](https://github.com/o9-9/discord-stereo-batch)**
-  - **[patcher](https://github.com/o9-9/discord-stereo-patcher)**
-  - **[finder](https://github.com/o9-9/discord-stereo-finder)**
-  - **[backup](https://github.com/o9-9/discord-stereo-backup)**
-  - **[distribution](https://github.com/o9-9/discord-stereo-windows)**
+  - **[fixer](https://github.com/o9-9/stereo-powershell)**
+  - **[batch](https://github.com/o9-9/stereo-batch)**
+  - **[patcher](https://github.com/o9-9/stereo-patcher)**
+  - **[finder](https://github.com/o9-9/stereo-finder)**
+  - **[backup](https://github.com/o9-9/stereo-backup)**
+  - **[system](https://github.com/o9-9/stereo-windows)**
 - Primary Languages: **JavaScript, Python, PowerShell, Batchfile, Other**
 - Current Structure: **Already modern, but can be optimized per GitHub best practices**
 
@@ -66,7 +66,7 @@ stereo/
 │   │   ├── src/
 │   │   └── package.json
 │   │
-│   └── distribution/           (Hub: assets, docs, releases)
+│   └── system/           (Hub: assets, docs, releases)
 │       ├── README.md
 │       ├── docs/               Split docs from assets
 │       ├── assets/             Consolidate all assets
@@ -171,26 +171,26 @@ Create:
   packages/backup/package.json
 ```
 
-6. distribution/ – Consolidate assets
+6. system/ – Consolidate assets
 
 ```t
-Move:  Updates/ → packages/distribution/assets/
-Move:  Voice Node Dump/ → packages/distribution/assets/voice-dumps/
+Move:  Updates/ → packages/system/assets/
+Move:  Voice Node Dump/ → packages/system/assets/voice-dumps/
 Rename folders for clarity:
   assets/Windows/           (keeps name)
   assets/Linux/             (keeps name)
   assets/Nodes/             (was: Offset Finder)
   assets/voice-dumps/       (was: Voice Node Dump)
 Create:
-  packages/distribution/docs/    (extracted docs)
-  packages/distribution/package.json
+  packages/system/docs/    (extracted docs)
+  packages/system/package.json
 ```
 
 #### Create Root Documentation - Root-level `docs/` folder:
 
 ```t
 docs/
-├── ARCHITECTURE.md         # Extract from distribution/README.md
+├── ARCHITECTURE.md         # Extract from system/README.md
 ├── SETUP.md                # Dev environment setup
 ├── PLATFORMS.md            # Windows/Linux/macOS instructions
 ├── TROUBLESHOOTING.md      # FAQ extracted from READMEs
@@ -201,7 +201,7 @@ docs/
 
 1. All **(README.md)**
 
-- Update relative paths from `packages/distribution/Updates/Windows/...` to `packages/distribution/assets/windows/...`
+- Update relative paths from `packages/system/Updates/Windows/...` to `packages/system/assets/windows/...`
 - Update package references to new `src/` locations
 
 2. PowerShell scripts **(voice-fixer, node-patcher)**
@@ -240,7 +240,7 @@ docs/
 
 - [ ] All packages have `src/`, `tests/`, `README.md`, `package.json`
 - [ ] No files exist directly in `packages/{name}/` root (except those 4)
-- [ ] `distribution/assets/` contains Windows/, Linux/, Nodes/, voice-dumps/
+- [ ] `system/assets/` contains Windows/, Linux/, Nodes/, voice-dumps/
 
 #### File Path Updates:
 

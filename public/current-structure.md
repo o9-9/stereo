@@ -48,7 +48,7 @@ discord-stereo/
 │ │ ├── src/
 │ │ └── package.json
 │ │
-│ └── distribution/ (Hub: assets, docs, releases)
+│ └── system/ (Hub: assets, docs, releases)
 │ ├── README.md
 │ ├── docs/ Split docs from assets
 │ ├── assets/ Consolidate all assets

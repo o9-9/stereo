@@ -9,15 +9,16 @@ TASK: Refactor using the structure above. For each action:
 5. **Test links** – Ensure GitHub raw URLs are correct
 
 NAMING RULES:
+
 - Folders: kebab-case (voice-fixer, offset-finder)
 - Scripts: kebab-case (discord-voice-fixer.ps1)
 - Docs: UPPERCASE.md (README.md, CONTRIBUTING.md)
 
 VERIFICATION:
 After each change, run:
-  grep -r "packages/distribution/Updates/" . 
-  (should return only .git/ files)
-  
+grep -r "packages/system/Updates/" .
+(should return only .git/ files)
+
 Check all relative paths work by opening in VS Code.
 
 Keep Discord Stereo functionality 100% intact.

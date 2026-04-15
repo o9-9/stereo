@@ -1,0 +1,35 @@
+{
+	"DANGEROUS_ENABLE_DEVTOOLS_ONLY_ENABLE_IF_YOU_KNOW_WHAT_YOURE_DOING": true,
+	"openH264Enabled": true,
+	"enableH264MFElectron": true,
+	"enableH264MFZeroCopy": true,
+	"asyncClipsSourceDeinit": false,
+	"asyncVideoInputDeviceInit": false,
+	"enableHardwareAcceleration": true,
+	"BACKGROUND_COLOR": "#313338",
+	"SKIP_HOST_UPDATE": true,
+	"SKIP_MODULE_UPDATE": true,
+	"OPEN_ON_STARTUP": false,
+	"OPTIN_OPTIONAL_UPDATES": true,
+	"audioSubsystem": "experimental",
+	"useLegacyAudioDevice": false,
+	"debugLogging": false,
+	"trayBalloonShown": true,
+	"offloadAdmControls": true,
+	"MINIMIZE_TO_TRAY": false,
+	"IS_MAXIMIZED": true,
+	"IS_MINIMIZED": false,
+	"MIN_WIDTH": 940,
+	"MIN_HEIGHT": 500,
+	"WINDOW_BOUNDS": {
+		"x": 0,
+		"y": 0,
+		"width": 1280,
+		"height": 1440
+	},
+	"openasar": {
+		"setup": true,
+		"quickstart": false
+	},
+	"chromiumSwitches": {}
+}

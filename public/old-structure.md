@@ -9,7 +9,7 @@ discord-stereo/
 │ ├── offset-finder/
 │ │ └── scripts/
 │ ├── backup/
-│ └── distribution/
+│ └── system/
 │ ├── README.md
 │ ├── Updates/
 │ │ ├── Windows/

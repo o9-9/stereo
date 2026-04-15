@@ -1,0 +1,21 @@
+:root {
+	/* PRIMARY (main surfaces / chat background) */
+	--background-primary: #313338;
+
+	/* SECONDARY (side panels, member list, popouts) */
+	--background-secondary: #2b2d31;
+
+	/* TERTIARY (deeper layers: settings, modals, drawers) */
+	--background-tertiary: #232428;
+
+	/* BASE / QUATERNARY (lowest layer: server list, gutters) */
+	--background-quaternary: #1e1f22;
+
+	/* SURFACE / ELEVATION (inputs, message box, cards) */
+	--background-elevated: #383a40;
+
+	/* TEXT (for completeness) */
+	--text-primary: #f2f3f5;
+	--text-secondary: #b5bac1;
+	--text-muted: #80848e;
+}
